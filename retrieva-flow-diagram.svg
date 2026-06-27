@@ -1,0 +1,51 @@
+<svg viewBox="0 0 900 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Retrieva architecture flow diagram">
+  <style>
+    .box { fill:#f8fafc; stroke:#2563eb; stroke-width:2; rx:16; ry:16; }
+    .text { font-family:Arial, sans-serif; font-size:14px; fill:#111827; }
+    .subtitle { font-size:12px; fill:#475569; }
+    .arrow { stroke:#2563eb; stroke-width:3; fill:none; marker-end:url(#arrowhead); }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="#2563eb" />
+    </marker>
+  </defs>
+  <rect x="40" y="40" width="180" height="100" class="box" />
+  <text x="130" y="70" class="text" text-anchor="middle">Client / UI</text>
+  <text x="130" y="92" class="subtitle" text-anchor="middle">/ browser / mobile</text>
+
+  <rect x="280" y="40" width="220" height="100" class="box" />
+  <text x="390" y="70" class="text" text-anchor="middle">Retrieva API</text>
+  <text x="390" y="92" class="subtitle" text-anchor="middle">FastAPI + SSE chat</text>
+
+  <rect x="560" y="26" width="280" height="70" class="box" />
+  <text x="700" y="52" class="text" text-anchor="middle">PostgreSQL</text>
+  <text x="700" y="72" class="subtitle" text-anchor="middle">Session + messages</text>
+
+  <rect x="560" y="124" width="280" height="70" class="box" />
+  <text x="700" y="150" class="text" text-anchor="middle">RAG Pipeline</text>
+  <text x="700" y="170" class="subtitle" text-anchor="middle">Retrieval + generation</text>
+
+  <rect x="280" y="200" width="220" height="80" class="box" />
+  <text x="390" y="230" class="text" text-anchor="middle">Milvus</text>
+  <text x="390" y="252" class="subtitle" text-anchor="middle">Vector search store</text>
+
+  <rect x="40" y="220" width="180" height="80" class="box" />
+  <text x="130" y="250" class="text" text-anchor="middle">Redis</text>
+  <text x="130" y="272" class="subtitle" text-anchor="middle">Hybrid / BM25 cache</text>
+
+  <path d="M220,90 C245,90 255,90 280,90" class="arrow" />
+  <path d="M420,120 C420,140 420,140 420,150" class="arrow" />
+  <path d="M340,240 C340,240 340,240 280,240" class="arrow" />
+  <path d="M340,260 C340,260 340,260 280,260" class="arrow" />
+  <path d="M560,150 C520,150 520,150 520,150" class="arrow" />
+
+  <path d="M500,75 L560,75" class="arrow" />
+  <path d="M450,215 L560,215" class="arrow" />
+  <path d="M170,220 L280,220" class="arrow" />
+  <path d="M390,110 L390,200" class="arrow" />
+
+  <rect x="40" y="320" width="800" height="70" rx="16" ry="16" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1" />
+  <text x="110" y="350" class="text">SSE event stream:</text>
+  <text x="110" y="370" class="subtitle">retrieval_start → retrieval_complete → generation_start → token → generation_complete</text>
+</svg>

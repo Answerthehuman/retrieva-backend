@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-retrieva}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  milvus:
+    image: milvusdb/milvus:v2.3.0
+    command: ["milvus", "run", "standalone"]
+    environment:
+      MILVUS_DEPLOY_MODE: standalone
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - postgres
+      - redis
+
+  backend:
+    build: .
+    volumes:
+      - ./retrieva:/app/retrieva
+    ports:
+      - "9090:9090"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - REDIS_HOST=redis
+      - REDIS_PORT=${REDIS_PORT}
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=${MILVUS_PORT}
+      - MILVUS_DEFAULT_COLLECTION=${MILVUS_DEFAULT_COLLECTION}
+    depends_on:
+      - postgres
+      - redis
+      - milvus
+
+volumes:
+  postgres_data:

@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  backend:
+    environment:
+      POSTGRES_HOST: localhost
+      REDIS_HOST: localhost
+      MILVUS_HOST: localhost
+    ports:
+      - "9090:9090"
