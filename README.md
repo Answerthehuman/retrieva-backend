@@ -1,6 +1,6 @@
 # Retrieva
 
-Retrieva is a local hybrid Retrieval‑Augmented Generation (RAG) system inspired by the Compass architecture guide. It combines a FastAPI backend, PostgreSQL, Redis, and Milvus vector search to deliver hybrid semantic search and streamed chat responses.
+Retrieva is a hybrid Retrieval‑Augmented Generation (RAG) system. It combines a FastAPI backend, PostgreSQL, Redis, and Milvus vector search to deliver hybrid semantic search and streamed chat responses.
 
 ## Architecture
 
