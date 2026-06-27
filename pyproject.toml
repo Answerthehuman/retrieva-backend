@@ -2,7 +2,7 @@
 name = "backend"
 version = "0.1.0"
 description = "Generic hybrid RAG backend"
-authors = ["OpenAI <assistant@example.com>"]
+authors = ["Retrieva <team@retrieva.dev>"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -11,10 +11,24 @@ uvicorn = {extras = ["standard"], version = "^0.24.0"}
 sqlalchemy = "^2.0.4"
 psycopg2-binary = "^2.9.12"
 redis = "^5.3.1"
-pymilvus = "^2.3.0"
+pymilvus = "^2.4.0"
 python-dotenv = "^1.0.1"
 pydantic = "^2.10.12"
+pydantic-settings = "^2.0"
 requests = "^2.31.0"
+python-multipart = "^0.0.20"
+
+# pyzo-ai-core — local editable install with all relevant extras
+pyzo-ai-core = {path = "../../pyzo-ai-core-main", develop = true, extras = [
+    "native-parser",
+    "rag-retrieval",
+    "vector-store",
+    "metadata-filter",
+    "reranker",
+    "gemini",
+    "openai",
+    "http-call",
+]}
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

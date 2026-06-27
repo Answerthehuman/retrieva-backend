@@ -5,12 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from ...core.db.database import get_db
-from ...core.db.models.chat_message import ChatMessage
-from ...core.db.models.session import Session as SessionModel
-from ...core.utils.sse import format_sse_event
-from ...services.rag.pipeline.rag_pipeline import RAGPipeline
-from ...shared.schemas.chat import (
+from core.db.database import get_db
+from core.db.models.chat_message import ChatMessage
+from core.db.models.session import Session as SessionModel
+from core.utils.sse import format_sse_event
+from services.rag.pipeline.rag_pipeline import RAGPipeline
+from shared.schemas.chat import (
     CreateSessionRequest,
     SessionResponse,
     SendMessageRequest,
@@ -59,24 +59,55 @@ async def stream_message(session_id: str, request: SendMessageRequest, db: Sessi
     db.commit()
 
     pipeline = RAGPipeline()
+    
+    # Load recent chat history (e.g. last 10 messages)
+    history_msgs = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+    chat_history = [{"role": m.message_type, "content": m.content} for m in history_msgs[-10:]]
 
     async def event_generator():
-        yield format_sse_event("event", {"format": "retrieval_start"})
-        result = pipeline.query(request.message)
-        yield format_sse_event("event", {"format": "retrieval_complete", "documents": result["documents"]})
-        yield format_sse_event("event", {"format": "generation_start"})
+        full_response = []
+        
+        async for sse_string in pipeline.query(
+            query_text=request.message,
+            chat_history=chat_history,
+            filters=request.filters,
+        ):
+            yield sse_string
+            
+            # If this is a token event, we want to accumulate it for the DB save
+            import json
+            try:
+                if sse_string.startswith("data: "):
+                    payload_str = sse_string[6:].strip()
+                    payload = json.loads(payload_str)
+                    if payload.get("type") == "token" and "content" in payload:
+                        full_response.append(payload["content"])
+            except Exception as e:
+                # Log but don't fail the stream
+                import logging
+                logging.getLogger(__name__).warning("Error accumulating token for DB save: %s", e)
 
-        for chunk in result["response"]:
-            yield format_sse_event("token", {"format": "markdown", "content": chunk})
-
-        yield format_sse_event("event", {"format": "generation_complete"})
-
-        assistant_message = ChatMessage(
-            session_id=session_id,
-            message_type="assistant",
-            content="".join(result["response"]),
-        )
-        db.add(assistant_message)
-        db.commit()
+        # Save assistant's response to database
+        if full_response:
+            assistant_message = ChatMessage(
+                session_id=session_id,
+                message_type="assistant",
+                content="".join(full_response),
+            )
+            # Use a fresh session for the background save to avoid concurrency issues with generator
+            db_save = next(get_db())
+            try:
+                db_save.add(assistant_message)
+                db_save.commit()
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error("Failed to save assistant message: %s", e)
+            finally:
+                db_save.close()
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"})
