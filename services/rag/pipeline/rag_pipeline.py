@@ -69,14 +69,15 @@ class RAGPipeline:
 
     async def retrieve(self, query: str, collection_name: str, filters: Optional[str] = None) -> List[Dict]:
         """Execute parallel semantic/hybrid search and reranking."""
-        from pyzo_ai_core.nodes.rag_retrieval import retrieve as core_retrieve
+        from services.rag.retrieval import retrieve as internal_retrieve
         
         # Simple step generation for single collection
         steps = [{"query": query, "collection": collection_name}]
         
-        # Use pyzo-ai-core's standalone retrieve function
-        docs = await core_retrieve(
-            steps=steps,
+        # Use our internal retrieve function
+        docs, _ = await internal_retrieve(
+            retrieval_plan=steps,
+            standalone_query=query,
             retriever=self.retriever,
             reranker=self.reranker,
             output_fields=["content", "document_summary", "source", "page", "id"],
@@ -102,8 +103,6 @@ class RAGPipeline:
 
     async def generate(self, query: str, context: str, chat_history: Optional[List[Dict[str, str]]] = None) -> AsyncGenerator[str, None]:
         """Stream an LLM response with injected context."""
-        from pyzo_ai_core.nodes.llm_call import call_llm
-        
         system_prompt = (
             "You are a helpful assistant. Use the following retrieved context to answer the user's question.\n"
             "If the answer is not in the context, say so.\n"

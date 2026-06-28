@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List
 
-from pyzo_ai_core.nodes.short_term_memory import CallableBackend
+from .backend import CallableBackend
 
 from core.db.database import SessionLocal
 from core.db.models.chat_message import ChatMessage

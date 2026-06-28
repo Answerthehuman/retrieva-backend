@@ -28,11 +28,11 @@ def get_llm(settings: Optional[Settings] = None):
     s = settings or get_settings()
 
     if s.llm_provider == "openai":
-        from pyzo_ai_core.providers import get_openai
+        from core.llm.openai import get_openai
         _llm = get_openai(model=s.llm_model, temperature=s.llm_temperature)
         logger.info("LLM provider: OpenAI (%s)", s.llm_model)
     else:
-        from pyzo_ai_core.providers import get_gemini
+        from core.llm.gemini import get_gemini
         _llm = get_gemini(model=s.llm_model, temperature=s.llm_temperature)
         logger.info("LLM provider: Gemini (%s)", s.llm_model)
 
@@ -48,11 +48,11 @@ def get_embeddings(settings: Optional[Settings] = None):
     s = settings or get_settings()
 
     if s.embedding_provider == "openai":
-        from pyzo_ai_core.providers import get_openai_embeddings
+        from core.llm.openai import get_openai_embeddings
         _embeddings = get_openai_embeddings(model=s.embedding_model)
         logger.info("Embedding provider: OpenAI (%s)", s.embedding_model)
     else:
-        from pyzo_ai_core.providers import get_gemini_embeddings
+        from core.llm.gemini import get_gemini_embeddings
         _embeddings = get_gemini_embeddings(model=s.embedding_model)
         logger.info("Embedding provider: Gemini (%s)", s.embedding_model)
 
@@ -65,7 +65,7 @@ def get_retriever(settings: Optional[Settings] = None):
     if _retriever is not None:
         return _retriever
 
-    from pyzo_ai_core.nodes.rag_retrieval import AsyncRetriever
+    from services.rag.retrieval import AsyncRetriever
 
     s = settings or get_settings()
     _retriever = AsyncRetriever(
@@ -87,7 +87,7 @@ def get_reranker(settings: Optional[Settings] = None):
     if not s.rerank_enabled:
         return None
 
-    from pyzo_ai_core.nodes.rag_retrieval import Reranker
+    from services.rag.retrieval import Reranker
 
     _reranker = Reranker(model_name=s.rerank_model, top_k=s.rerank_top_k)
     logger.info("Reranker ready: %s (top_k=%d)", s.rerank_model, s.rerank_top_k)

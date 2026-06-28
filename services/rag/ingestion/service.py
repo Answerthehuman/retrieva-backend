@@ -5,10 +5,9 @@ from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connec
 
 from core.config.settings import get_settings
 from core.providers import get_embeddings, get_llm
-from pyzo_ai_core.nodes.document_summary import DocumentSummaryNode
-from pyzo_ai_core.nodes.native_parser import NativeParserNode
-from pyzo_ai_core.nodes.recursive_chunking import RecursiveChunkingNode
-from pyzo_ai_core.nodes.vector_store.tools import MilvusWriter
+from services.rag.ingestion.parser.parser import NativeParser
+from services.rag.ingestion.chunker.chunker import RecursiveChunker
+from services.rag.ingestion.vector_store.writer import MilvusWriter
 
 logger = logging.getLogger(__name__)
 
@@ -61,13 +60,12 @@ class IngestionService:
             uri=self.settings.milvus_uri
         )
         
-        # Initialize pipeline nodes
-        self.parser = NativeParserNode(vision_llm=self.llm)
-        self.chunker = RecursiveChunkingNode(
+        # Initialize pipeline tools
+        self.parser = NativeParser(vision_llm=self.llm)
+        self.chunker = RecursiveChunker(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
         )
-        self.summarizer = DocumentSummaryNode(llm=self.llm)
 
     async def ingest_file(
         self, 
@@ -91,12 +89,7 @@ class IngestionService:
         
         # 1. Parse pages (returns list of strings, one per page/section)
         logger.info("Parsing file: %s", file_path)
-        # NativeParserNode acts on LangGraph state, but we can access its tool directly for simplicity
-        # or use it with a mock state. The pyzo_ai_core implementation wraps a strategy.
-        # It's cleaner to instantiate the tool directly.
-        from pyzo_ai_core.nodes.native_parser.tools import NativeParser
-        native_parser = NativeParser(vision_llm=self.llm)
-        pages = native_parser.parse_pages(file_path)
+        pages = self.parser.parse_pages(file_path)
         
         if not pages:
             logger.warning("No text extracted from %s", file_path)
@@ -104,20 +97,14 @@ class IngestionService:
             
         # 2. Chunk
         logger.info("Chunking %d pages", len(pages))
-        from pyzo_ai_core.nodes.recursive_chunking.tools import RecursiveChunker
         import uuid
-        
-        chunker = RecursiveChunker(
-            chunk_size=self.settings.chunk_size, 
-            chunk_overlap=self.settings.chunk_overlap
-        )
         
         doc_id = str(uuid.uuid4())
         source = source_name or str(file_path)
         
         all_chunks = []
         for i, page_text in enumerate(pages):
-            page_chunks = chunker.chunk(
+            page_chunks = self.chunker.chunk(
                 page_text, 
                 document_metadata={
                     "document_id": doc_id,
@@ -132,10 +119,15 @@ class IngestionService:
         # 3. Summarize document
         # Join a sample of the text for summarization to avoid massive context
         sample_text = "\n\n".join(pages)[:20000]
-        # We can use the standalone check
         logger.info("Generating document summary")
-        from pyzo_ai_core.nodes.document_summary.node import summarize_document
-        doc_summary = await summarize_document(sample_text, llm=self.llm)
+        
+        from langchain_core.messages import HumanMessage, SystemMessage
+        prompt = [
+            SystemMessage(content="You are an expert at concisely summarizing documents. Provide a short 2-3 sentence summary of the following document to help with retrieval and cataloging. Focus on the core topic and key findings."),
+            HumanMessage(content=sample_text)
+        ]
+        response = await self.llm.ainvoke(prompt)
+        doc_summary = str(response.content)
         logger.info("Document summary: %.100s...", doc_summary)
         
         # 4. Embed and Store
