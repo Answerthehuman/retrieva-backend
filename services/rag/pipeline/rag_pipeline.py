@@ -71,6 +71,27 @@ class RAGPipeline:
         """Execute parallel semantic/hybrid search and reranking."""
         from services.rag.retrieval import retrieve as internal_retrieve
         
+        # Define the loader to retrieve BM25 statistics from cache/disk
+        def bm25_loader(col_name: str):
+            if not self.settings.hybrid_search_enabled:
+                return None
+            from core.utils.bm25 import SparseVectorGenerator, load_bm25_stats
+            stats = load_bm25_stats(col_name)
+            if not stats:
+                return None
+            gen = SparseVectorGenerator()
+            gen.vocab = stats["vocab"]
+            gen.idf_scores = {int(k): v for k, v in stats["idf_scores"].items()}
+            gen._doc_frequencies = stats.get("doc_frequencies", {})
+            gen.doc_count = stats["doc_count"]
+            gen._total_doc_length = stats.get("total_doc_length", 0)
+            gen.avg_doc_length = stats["avg_doc_length"]
+            gen.k1 = stats.get("k1", 1.2)
+            gen.b = stats.get("b", 0.75)
+            if gen._total_doc_length == 0 and gen.doc_count > 0:
+                gen._total_doc_length = int(gen.avg_doc_length * gen.doc_count)
+            return gen
+
         # Simple step generation for single collection
         steps = [{"query": query, "collection": collection_name}]
         
@@ -79,6 +100,7 @@ class RAGPipeline:
             retrieval_plan=steps,
             standalone_query=query,
             retriever=self.retriever,
+            bm25_loader=bm25_loader,
             reranker=self.reranker,
             output_fields=["content", "document_summary", "source", "page", "id"],
             filters=filters,
@@ -139,3 +161,15 @@ class RAGPipeline:
         async for chunk in self.llm.astream(full_messages):
             if chunk.content:
                 yield chunk.content
+
+    def extract_metadata_filters(self, query: str) -> Optional[str]:
+        """Extract a Milvus filter expression from a natural language query using the LLM."""
+        try:
+            from services.rag.retrieval.metadata_filter import extract_filter
+            from services.rag.retrieval.metadata_filter.tools.schema_loader import get_default_fields
+            fields = get_default_fields()
+            filter_expr = extract_filter(query, llm=self.llm, fields=fields)
+            return filter_expr
+        except Exception as e:
+            logger.error(f"Failed to extract metadata filters: {e}")
+            return None

@@ -18,6 +18,8 @@ def _ensure_collection(collection_name: str, dim: int) -> Collection:
 
     logger.info("Creating Milvus collection: %s", collection_name)
     
+    settings = get_settings()
+    
     fields = [
         FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=256),
         FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
@@ -32,6 +34,12 @@ def _ensure_collection(collection_name: str, dim: int) -> Collection:
         FieldSchema(name="ingested_at", dtype=DataType.VARCHAR, max_length=64),
     ]
     
+    if settings.hybrid_search_enabled:
+        fields.append(
+            FieldSchema(name="sparse_vector", dtype=DataType.SPARSE_FLOAT_VECTOR)
+        )
+        logger.info("Added sparse_vector field for hybrid search")
+        
     schema = CollectionSchema(fields=fields, description="Retrieva Document Store", enable_dynamic_field=True)
     collection = Collection(name=collection_name, schema=schema)
     
@@ -41,8 +49,17 @@ def _ensure_collection(collection_name: str, dim: int) -> Collection:
         "params": {"M": 16, "efConstruction": 200},
     }
     collection.create_index(field_name="embedding", index_params=index_params)
-    logger.info("Created index for collection: %s", collection_name)
+    logger.info("Created dense index for collection: %s", collection_name)
     
+    if settings.hybrid_search_enabled:
+        sparse_index_params = {
+            "metric_type": "IP",
+            "index_type": "SPARSE_INVERTED_INDEX",
+            "params": {"drop_ratio_build": 0.0}
+        }
+        collection.create_index(field_name="sparse_vector", index_params=sparse_index_params)
+        logger.info("Created sparse index for collection: %s", collection_name)
+        
     return collection
 
 
@@ -130,6 +147,54 @@ class IngestionService:
         doc_summary = str(response.content)
         logger.info("Document summary: %.100s...", doc_summary)
         
+        # Generate BM25 sparse vectors if hybrid search is enabled
+        if self.settings.hybrid_search_enabled:
+            logger.info("Generating BM25 sparse vectors for ingestion...")
+            from core.utils.bm25 import SparseVectorGenerator, save_bm25_stats, load_bm25_stats
+            
+            # Load existing stats or initialize fresh generator
+            sparse_generator = SparseVectorGenerator()
+            existing_stats = load_bm25_stats(target_collection)
+            if existing_stats:
+                sparse_generator.vocab = existing_stats["vocab"]
+                sparse_generator.idf_scores = {int(k): v for k, v in existing_stats["idf_scores"].items()}
+                sparse_generator._doc_frequencies = existing_stats.get("doc_frequencies", {})
+                sparse_generator.doc_count = existing_stats["doc_count"]
+                sparse_generator._total_doc_length = existing_stats.get("total_doc_length", 0)
+                sparse_generator.avg_doc_length = existing_stats["avg_doc_length"]
+                sparse_generator.k1 = existing_stats.get("k1", 1.2)
+                sparse_generator.b = existing_stats.get("b", 0.75)
+                if sparse_generator._total_doc_length == 0 and sparse_generator.doc_count > 0:
+                    sparse_generator._total_doc_length = int(sparse_generator.avg_doc_length * sparse_generator.doc_count)
+            
+            # Build vocabulary with new chunk content
+            chunk_texts = [chunk["content"] for chunk in all_chunks]
+            sparse_generator.build_vocabulary(chunk_texts, incremental=True)
+            
+            # Generate sparse vector for each chunk
+            for chunk in all_chunks:
+                chunk["sparse_vector"] = sparse_generator.generate_sparse_vector(chunk["content"])
+                
+            # Save stats back to disk/cache
+            redis_client = None
+            try:
+                import redis
+                redis_client = redis.Redis(host=self.settings.redis_host, port=self.settings.redis_port, decode_responses=True)
+            except Exception:
+                pass
+                
+            stats_dict = {
+                "vocab": sparse_generator.vocab,
+                "idf_scores": {str(k): v for k, v in sparse_generator.idf_scores.items()},
+                "doc_frequencies": sparse_generator._doc_frequencies,
+                "doc_count": sparse_generator.doc_count,
+                "total_doc_length": sparse_generator._total_doc_length,
+                "avg_doc_length": sparse_generator.avg_doc_length,
+                "k1": sparse_generator.k1,
+                "b": sparse_generator.b
+            }
+            save_bm25_stats(target_collection, stats_dict, redis_client=redis_client)
+
         # 4. Embed and Store
         logger.info("Writing to Milvus collection: %s", target_collection)
         writer = MilvusWriter(
