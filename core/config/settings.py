@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     retrieval_top_k: int = Field(50, env="RETRIEVAL_TOP_K")
     rerank_top_k: int = Field(10, env="RERANK_TOP_K")
 
+    # ── Agent ─────────────────────────────────────────────────────────────────
+    agent_max_tool_calls: int = Field(4, env="AGENT_MAX_TOOL_CALLS")
+
     # ── Chunking ──────────────────────────────────────────────────────────────
     chunk_size: int = Field(600, env="CHUNK_SIZE")
     chunk_overlap: int = Field(120, env="CHUNK_OVERLAP")

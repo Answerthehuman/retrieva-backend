@@ -2,114 +2,77 @@
 
 Extracts a Milvus filter expression from a natural language query using an LLM.
 
-The node never opens its own Milvus or Redis connections — the caller creates
-clients once and passes them in.
+Internal Retrieva module — no separate install step, import directly from
+`services.rag.retrieval.metadata_filter`.
 
 ## What it does
 
-1. Reads the last message from state as the query
-2. Resolves filterable field definitions (from fixed list, Redis cache, or Milvus schema)
-3. Calls the LLM to produce a Milvus filter expression
-4. Returns the expression to state as `filters`
+1. Takes the user's query (and a list of filterable field definitions)
+2. Calls the LLM to produce a Milvus filter expression
+3. Returns the expression, or `None` if no filter applies
 
-## Install
+It's used by `agents/tools.py::search_knowledge_base` to automatically derive
+metadata filters from the user's question before hitting Milvus, merged with
+any caller-supplied filter override.
 
-```toml
-[tool.poetry.dependencies]
-pyzo-ai-core = {git = "git@github.com:Pyzo-AI/pyzo-ai-core.git", branch = "main"}
-```
+## Usage
 
-## Import
+### Fixed field list (simplest)
 
 ```python
-from pyzo_ai_core.nodes.metadata_filter import MetadataFilterNode
-```
+from services.rag.retrieval.metadata_filter import extract_filter
 
----
-
-## Usage modes
-
-### Mode A — fixed schema (simplest)
-
-Pass field definitions directly. No external services needed.
-
-```python
-node = MetadataFilterNode(
+expr = await extract_filter(
+    "show me proposals from last year",
     llm=get_gemini(),
     fields=[
-        {"name": "file_name",    "dtype": "VARCHAR", "description": "Source file name"},
+        {"name": "file_name", "dtype": "VARCHAR", "description": "Source file name"},
         {"name": "section_type", "dtype": "VARCHAR", "description": "Type of section",
          "examples": ["introduction", "table", "summary"]},
-        {"name": "page",         "dtype": "INT64",   "description": "Page number"},
+        {"name": "page", "dtype": "INT64", "description": "Page number"},
     ],
 )
 ```
 
-### Mode B — Milvus schema + Redis cache 
+### Built-in defaults
 
-Schema is loaded from the collection once, cached in Redis, and served from
-cache on every subsequent call. Pass `fetch_values=True` to also query Milvus
-for distinct values per VARCHAR field and attach them as `examples` in the prompt.
+Falls back to a generic field set matching Retrieva's actual Milvus schema
+(`document_id`, `source`, `page`, `ingested_at`) when no `fields` are given:
 
 ```python
-from pymilvus import Collection, connections
-import redis
-
-connections.connect(uri=os.environ["MILVUS_URI"])
-collection = Collection("compass_docs")
-collection.load()
-
-redis_client = redis.Redis(host="localhost", port=6380, decode_responses=True)
-
-node = MetadataFilterNode(
-    llm=get_gemini(),
-    collection=collection,
-    redis_client=redis_client,
-    redis_key="myapp:fields:compass_docs",
-    fetch_values=True,      # query Milvus for example values on cache miss
-    excluded_fields=["ingested_at", "chunk_index"],
-)
+expr = await extract_filter("show me proposals", llm=get_gemini())
 ```
 
-After ingesting new documents, update the cache so the LLM sees fresh examples:
+### Full result (expression + cleaned query + confidence)
 
 ```python
-node.cache.update("file_name", ["new_report.pdf", "contract_2026.docx"])
+from services.rag.retrieval.metadata_filter import extract_filters_from_query, get_default_fields
+
+result = await extract_filters_from_query("show me proposals", get_default_fields(), llm=llm)
+# {"milvus_expression": '...', "cleaned_query": '...', "confidence": 0.9}
 ```
 
-### Mode C — Milvus schema, no cache
-
-Schema is re-read from Milvus on every call. Simpler setup, higher latency.
+### Validating an expression before use
 
 ```python
-node = MetadataFilterNode(
-    llm=get_gemini(),
-    collection=collection,
-    fetch_values=True,
-)
-```
+from services.rag.retrieval.metadata_filter import validate_expression
 
-### No args (built-in defaults)
-
-Falls back to a generic field set (project_name, document_type, file_type, source, section_type).
-
-```python
-node = MetadataFilterNode(llm=get_gemini())
+if validate_expression(expr):
+    ...  # safe to pass to Milvus
 ```
 
 ---
 
-## Parameters
+## Available utilities
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `llm` | any | LangChain-compatible LLM with `invoke()` |
-| `fields` | `List[dict]` | (Mode A) Fixed field definitions |
-| `collection` | `pymilvus.Collection` | (Mode B/C) Loaded collection to read schema from |
-| `excluded_fields` | `List[str]` | Field names to skip when loading from Milvus |
-| `fetch_values` | `bool` | Query Milvus for distinct VARCHAR values as examples (default `False`) |
-| `redis_client` | `redis.Redis` | (Mode B) Caller-created Redis client |
-| `redis_key` | `str` | (Mode B) Redis key for this node's field cache |
+| Function | Description |
+|---|---|
+| `extract_filter(query, *, llm, fields=None)` | Async. Returns just the expression string, or `None`. |
+| `extract_filters_from_query(query, available_fields, *, llm)` | Async. Returns the full `{milvus_expression, cleaned_query, confidence}` dict. |
+| `get_default_fields()` | Built-in fallback fields matching Retrieva's Milvus schema. |
+| `load_fields_from_collection(collection, ...)` | Reads filterable fields from a live pymilvus `Collection` schema. Not currently wired into the live query path — available for dynamic-schema use cases. |
+| `build_milvus_expression(filters)` / `validate_expression(expr)` | Build/validate a Milvus expression from a structured filter-dict list. |
+| `FieldCache` | Thin Redis wrapper for caching field definitions. Not currently wired into the live query path. |
 
 Field dict shape:
 ```python
@@ -121,76 +84,17 @@ Field dict shape:
 }
 ```
 
-Both `"dtype"` and `"type"` keys are accepted.
-
----
-
-## State contract
-
-| | Fields |
-|---|---|
-| **Reads** | `messages` |
-| **Writes** | `filters` |
-
-```python
-filters: str | None   # e.g. 'file_name like "%proposal%" AND page > 0'
-```
-
----
-
-## FieldCache — keeping examples fresh
-
-`FieldCache` is the thin Redis wrapper used internally. You can access it via
-`node.cache` to update example values from your ingestion pipeline:
-
-```python
-from pyzo_ai_core.nodes.metadata_filter import FieldCache
-
-# Standalone usage (e.g. in ingestion pipeline)
-cache = FieldCache(redis_client, "myapp:fields:compass_docs")
-cache.update("file_name", ["2026_annual_report.pdf"])
-cache.clear()   # force reload from Milvus on next call
-```
-
----
-
-## Loading schema without the node
-
-```python
-from pyzo_ai_core.nodes.metadata_filter import load_fields_from_collection
-
-fields = load_fields_from_collection(
-    collection,
-    excluded_fields=["id", "ingested_at"],
-    fetch_values=True,
-)
-```
-
----
-
-## Standalone filter extraction
-
-```python
-from pyzo_ai_core.nodes.metadata_filter import extract_filter, extract_filters_from_query
-
-# Returns just the expression string
-expr = extract_filter("show me proposals from last year", llm=llm, fields=fields)
-
-# Returns full dict with confidence + cleaned_query
-result = extract_filters_from_query("show me proposals", fields, llm=llm)
-# {"milvus_expression": '...', "cleaned_query": '...', "confidence": 0.9}
-```
-
 ---
 
 ## Refreshing the Milvus syntax docs
 
-The LLM prompt includes Milvus filter syntax documentation bundled with the package
-(`tools/milvus_filter_docs.md`). It is read once per process and cached in memory —
-no network call at runtime. To refresh it from the official Milvus docs:
+The LLM prompt includes Milvus filter syntax documentation bundled with this
+module (`tools/milvus_filter_docs.md`). It's read once per process and cached
+in memory — no network call at runtime. To refresh it from the official Milvus
+docs:
 
 ```bash
-python -m pyzo_ai_core.nodes.metadata_filter.tools.fetch_milvus_docs
+python -m services.rag.retrieval.metadata_filter.tools.fetch_milvus_docs
 ```
 
 Commit the updated `milvus_filter_docs.md` file afterwards.

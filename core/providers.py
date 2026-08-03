@@ -17,6 +17,7 @@ _llm = None
 _embeddings = None
 _retriever = None
 _reranker = None
+_agent_graph = None
 
 
 def get_llm(settings: Optional[Settings] = None):
@@ -92,6 +93,22 @@ def get_reranker(settings: Optional[Settings] = None):
     _reranker = Reranker(model_name=s.rerank_model, top_k=s.rerank_top_k)
     logger.info("Reranker ready: %s (top_k=%d)", s.rerank_model, s.rerank_top_k)
     return _reranker
+
+
+def get_agent_graph(settings: Optional[Settings] = None):
+    """Return the compiled Retrieva agent graph (built once, tools bound once)."""
+    global _agent_graph
+    if _agent_graph is not None:
+        return _agent_graph
+
+    from agents.graph import build_agent_graph
+    from agents.tools import build_tools
+
+    s = settings or get_settings()
+    tools = build_tools(retriever=get_retriever(s), reranker=get_reranker(s), llm=get_llm(s), settings=s)
+    _agent_graph = build_agent_graph(llm=get_llm(s), tools=tools)
+    logger.info("Agent graph compiled with %d tool(s)", len(tools))
+    return _agent_graph
 
 
 async def close_retriever():

@@ -1,4 +1,4 @@
-from .node import MetadataFilterNode, metadata_filter_node, extract_filter
+from .node import extract_filter
 from .tools import (
     FieldCache,
     load_fields_from_collection,
@@ -10,9 +10,6 @@ from .tools import (
 from .version import __version__
 
 __all__ = [
-    # Node
-    "MetadataFilterNode",
-    "metadata_filter_node",
     "extract_filter",
     # Schema loading
     "FieldCache",

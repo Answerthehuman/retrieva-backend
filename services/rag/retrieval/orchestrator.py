@@ -4,8 +4,8 @@ from typing import Dict, Any, List, Optional, Callable, Tuple
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_FIELDS = [
-    "content", "source", "page", "section_type", "section_name",
-    "section_summary", "document_summary", "file_name", "storage_link", "ingested_at",
+    "id", "content", "document_id", "document_summary", "source",
+    "page", "chunk_index", "total_chunks", "chunk_size", "ingested_at",
 ]
 
 
@@ -61,7 +61,7 @@ async def retrieve(
         )
         if reranker and documents:
             rerank_query = standalone_query or vs_steps[0].get("query", "")
-            documents = reranker.rerank(
+            documents = await reranker.rerank(
                 rerank_query, documents, top_k=rerank_top_k, batch_size=rerank_batch_size
             )
     else:
@@ -78,7 +78,7 @@ async def retrieve(
                 collection_name, standalone_query, output_fields=_output_fields, filters=filters
             )
             if reranker and documents:
-                documents = reranker.rerank(
+                documents = await reranker.rerank(
                     standalone_query, documents, top_k=rerank_top_k, batch_size=rerank_batch_size
                 )
             logger.info(f"Single-query retrieval: query='{standalone_query}', {len(documents)} documents")

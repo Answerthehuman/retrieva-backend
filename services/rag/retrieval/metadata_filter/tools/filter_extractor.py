@@ -24,7 +24,7 @@ def _load_milvus_docs() -> str:
     return _load_prompt(_MILVUS_DOCS_PATH)
 
 
-def extract_filters_from_query(
+async def extract_filters_from_query(
     query: str,
     available_fields: List[Dict[str, Any]],
     *,
@@ -36,7 +36,7 @@ def extract_filters_from_query(
     Args:
         query: User's natural language query
         available_fields: Filterable field definitions from schema_loader
-        llm: LangChain-compatible LLM with an invoke() method
+        llm: LangChain-compatible LLM with an ainvoke() method
 
     Returns:
         {
@@ -61,7 +61,7 @@ def extract_filters_from_query(
             query=query,
         )
 
-        response = llm.invoke([
+        response = await llm.ainvoke([
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ])
