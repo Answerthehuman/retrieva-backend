@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -70,19 +71,24 @@ class IngestionService:
         self.settings = get_settings()
         self.llm = get_llm(self.settings)
         self.embeddings = get_embeddings(self.settings)
-        
-        # Connect to Milvus for schema creation (writer uses standard connection)
-        connections.connect(
-            alias="default", 
-            uri=self.settings.milvus_uri
-        )
-        
+
         # Initialize pipeline tools
         self.parser = NativeParser(vision_llm=self.llm)
         self.chunker = RecursiveChunker(
             chunk_size=self.settings.chunk_size,
             chunk_overlap=self.settings.chunk_overlap,
         )
+
+    def _connect_milvus(self) -> None:
+        """Open the synchronous pymilvus connection used for schema work.
+
+        Idempotent, and deliberately kept out of __init__: the constructor runs
+        inside an async request handler, and connections.connect() is blocking
+        network I/O. Callers dispatch this via asyncio.to_thread.
+        """
+        if connections.has_connection("default"):
+            return
+        connections.connect(alias="default", uri=self.settings.milvus_uri)
 
     async def ingest_file(
         self, 
@@ -101,13 +107,20 @@ class IngestionService:
             Dict containing ingestion statistics.
         """
         target_collection = collection_name or self.settings.milvus_default_collection
-        collection = _ensure_collection(target_collection, self.settings.embedding_dim)
-        collection.load()
-        
+
+        # Schema/collection work uses the blocking pymilvus API — keep it off
+        # the event loop so uploads don't stall in-flight chat streams.
+        await asyncio.to_thread(self._connect_milvus)
+        collection = await asyncio.to_thread(
+            _ensure_collection, target_collection, self.settings.embedding_dim
+        )
+        await asyncio.to_thread(collection.load)
+
         # 1. Parse pages (returns list of strings, one per page/section)
+        # CPU-bound (PyMuPDF) and potentially vision-LLM bound.
         logger.info("Parsing file: %s", file_path)
-        pages = self.parser.parse_pages(file_path)
-        
+        pages = await asyncio.to_thread(self.parser.parse_pages, file_path)
+
         if not pages:
             logger.warning("No text extracted from %s", file_path)
             return {"inserted": 0, "collection_name": target_collection}
@@ -118,19 +131,25 @@ class IngestionService:
         
         doc_id = str(uuid.uuid4())
         source = source_name or str(file_path)
-        
-        all_chunks = []
-        for i, page_text in enumerate(pages):
-            page_chunks = self.chunker.chunk(
-                page_text, 
-                document_metadata={
-                    "document_id": doc_id,
-                    "source": source,
-                    "page": i + 1
-                }
-            )
-            all_chunks.extend(page_chunks)
-            
+
+        def _chunk_all_pages():
+            chunks = []
+            for i, page_text in enumerate(pages):
+                chunks.extend(
+                    self.chunker.chunk(
+                        page_text,
+                        document_metadata={
+                            "document_id": doc_id,
+                            "source": source,
+                            "page": i + 1,
+                        },
+                    )
+                )
+            return chunks
+
+        # One thread hop for the whole loop rather than one per page.
+        all_chunks = await asyncio.to_thread(_chunk_all_pages)
+
         logger.info("Generated %d chunks total", len(all_chunks))
             
         # 3. Summarize document
@@ -147,53 +166,59 @@ class IngestionService:
         doc_summary = str(response.content)
         logger.info("Document summary: %.100s...", doc_summary)
         
-        # Generate BM25 sparse vectors if hybrid search is enabled
+        # Generate BM25 sparse vectors if hybrid search is enabled.
+        # Vocabulary building is CPU-bound and stats persistence touches disk and
+        # Redis, so the whole block runs off the event loop.
         if self.settings.hybrid_search_enabled:
             logger.info("Generating BM25 sparse vectors for ingestion...")
-            from core.utils.bm25 import SparseVectorGenerator, save_bm25_stats, load_bm25_stats
-            
-            # Load existing stats or initialize fresh generator
-            sparse_generator = SparseVectorGenerator()
-            existing_stats = load_bm25_stats(target_collection)
-            if existing_stats:
-                sparse_generator.vocab = existing_stats["vocab"]
-                sparse_generator.idf_scores = {int(k): v for k, v in existing_stats["idf_scores"].items()}
-                sparse_generator._doc_frequencies = existing_stats.get("doc_frequencies", {})
-                sparse_generator.doc_count = existing_stats["doc_count"]
-                sparse_generator._total_doc_length = existing_stats.get("total_doc_length", 0)
-                sparse_generator.avg_doc_length = existing_stats["avg_doc_length"]
-                sparse_generator.k1 = existing_stats.get("k1", 1.2)
-                sparse_generator.b = existing_stats.get("b", 0.75)
-                if sparse_generator._total_doc_length == 0 and sparse_generator.doc_count > 0:
-                    sparse_generator._total_doc_length = int(sparse_generator.avg_doc_length * sparse_generator.doc_count)
-            
-            # Build vocabulary with new chunk content
-            chunk_texts = [chunk["content"] for chunk in all_chunks]
-            sparse_generator.build_vocabulary(chunk_texts, incremental=True)
-            
-            # Generate sparse vector for each chunk
-            for chunk in all_chunks:
-                chunk["sparse_vector"] = sparse_generator.generate_sparse_vector(chunk["content"])
-                
-            # Save stats back to disk/cache
-            redis_client = None
-            try:
-                import redis
-                redis_client = redis.Redis(host=self.settings.redis_host, port=self.settings.redis_port, decode_responses=True)
-            except Exception:
-                pass
-                
-            stats_dict = {
-                "vocab": sparse_generator.vocab,
-                "idf_scores": {str(k): v for k, v in sparse_generator.idf_scores.items()},
-                "doc_frequencies": sparse_generator._doc_frequencies,
-                "doc_count": sparse_generator.doc_count,
-                "total_doc_length": sparse_generator._total_doc_length,
-                "avg_doc_length": sparse_generator.avg_doc_length,
-                "k1": sparse_generator.k1,
-                "b": sparse_generator.b
-            }
-            save_bm25_stats(target_collection, stats_dict, redis_client=redis_client)
+
+            def _build_sparse_vectors():
+                from core.utils.bm25 import SparseVectorGenerator, save_bm25_stats, load_bm25_stats
+
+                # Load existing stats or initialize fresh generator
+                sparse_generator = SparseVectorGenerator()
+                existing_stats = load_bm25_stats(target_collection)
+                if existing_stats:
+                    sparse_generator.vocab = existing_stats["vocab"]
+                    sparse_generator.idf_scores = {int(k): v for k, v in existing_stats["idf_scores"].items()}
+                    sparse_generator._doc_frequencies = existing_stats.get("doc_frequencies", {})
+                    sparse_generator.doc_count = existing_stats["doc_count"]
+                    sparse_generator._total_doc_length = existing_stats.get("total_doc_length", 0)
+                    sparse_generator.avg_doc_length = existing_stats["avg_doc_length"]
+                    sparse_generator.k1 = existing_stats.get("k1", 1.2)
+                    sparse_generator.b = existing_stats.get("b", 0.75)
+                    if sparse_generator._total_doc_length == 0 and sparse_generator.doc_count > 0:
+                        sparse_generator._total_doc_length = int(sparse_generator.avg_doc_length * sparse_generator.doc_count)
+
+                # Build vocabulary with new chunk content
+                chunk_texts = [chunk["content"] for chunk in all_chunks]
+                sparse_generator.build_vocabulary(chunk_texts, incremental=True)
+
+                # Generate sparse vector for each chunk
+                for chunk in all_chunks:
+                    chunk["sparse_vector"] = sparse_generator.generate_sparse_vector(chunk["content"])
+
+                # Save stats back to disk/cache
+                redis_client = None
+                try:
+                    import redis
+                    redis_client = redis.Redis(host=self.settings.redis_host, port=self.settings.redis_port, decode_responses=True)
+                except Exception:
+                    pass
+
+                stats_dict = {
+                    "vocab": sparse_generator.vocab,
+                    "idf_scores": {str(k): v for k, v in sparse_generator.idf_scores.items()},
+                    "doc_frequencies": sparse_generator._doc_frequencies,
+                    "doc_count": sparse_generator.doc_count,
+                    "total_doc_length": sparse_generator._total_doc_length,
+                    "avg_doc_length": sparse_generator.avg_doc_length,
+                    "k1": sparse_generator.k1,
+                    "b": sparse_generator.b
+                }
+                save_bm25_stats(target_collection, stats_dict, redis_client=redis_client)
+
+            await asyncio.to_thread(_build_sparse_vectors)
 
         # 4. Embed and Store
         logger.info("Writing to Milvus collection: %s", target_collection)
@@ -202,8 +227,8 @@ class IngestionService:
             embedding_model=self.embeddings,
             batch_size=100
         )
-        
-        stats = writer.upsert(all_chunks, document_summary=doc_summary)
+
+        stats = await writer.upsert(all_chunks, document_summary=doc_summary)
         stats["collection_name"] = target_collection
         stats["document_summary"] = doc_summary
         stats["file_name"] = source

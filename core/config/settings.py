@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: Optional[str] = Field(None, env="DATABASE_URL")
+    # Opt-in SQLite for zero-setup local dev. Off by default so that a
+    # configured Postgres is actually used instead of being silently ignored.
+    use_sqlite: bool = Field(False, env="USE_SQLITE")
     postgres_user: str = Field("postgres", env="POSTGRES_USER")
     postgres_password: str = Field("postgres", env="POSTGRES_PASSWORD")
     postgres_db: str = Field("retrieva", env="POSTGRES_DB")

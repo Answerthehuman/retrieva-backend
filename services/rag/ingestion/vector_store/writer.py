@@ -1,4 +1,10 @@
-"""Milvus batch writer — embeds chunks and upserts into a collection."""
+"""Milvus batch writer — embeds chunks and upserts into a collection.
+
+Embedding calls and the synchronous pymilvus Collection API are blocking I/O.
+They are dispatched through asyncio.to_thread so ingestion cannot stall the
+FastAPI event loop (and with it every in-flight chat stream).
+"""
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -53,7 +59,7 @@ class MilvusWriter:
             f"fields={self._field_names}, primary='{self._primary_key}'"
         )
 
-    def upsert(
+    async def upsert(
         self,
         chunks: List[Dict[str, Any]],
         *,
@@ -74,25 +80,25 @@ class MilvusWriter:
         if not chunks:
             return {"inserted": 0}
 
-        chunks = self._ensure_embeddings(chunks)
+        chunks = await self._ensure_embeddings(chunks)
         ingested_at = datetime.now(timezone.utc).isoformat()
 
         total_inserted = 0
         for i in range(0, len(chunks), self._batch_size):
             batch = chunks[i:i + self._batch_size]
             data = self._build_insert_data(batch, document_summary=document_summary, ingested_at=ingested_at)
-            self._collection.upsert(data)
+            await asyncio.to_thread(self._collection.upsert, data)
             total_inserted += len(batch)
             logger.info(
                 f"Upserted batch {i // self._batch_size + 1}: "
                 f"{len(batch)} chunks → '{self._collection.name}'"
             )
 
-        self._collection.flush()
+        await asyncio.to_thread(self._collection.flush)
         logger.info(f"Flush complete. Total upserted: {total_inserted}")
         return {"inserted": total_inserted}
 
-    def _ensure_embeddings(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _ensure_embeddings(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Generate dense_vector for chunks that don't already have one."""
         needs_embedding = [c for c in chunks if not c.get("dense_vector")]
         if not needs_embedding:
@@ -110,7 +116,7 @@ class MilvusWriter:
         all_vectors: List = []
         for i in range(0, len(texts), self._embed_batch_size):
             batch = texts[i:i + self._embed_batch_size]
-            vectors = self._embedding_model.embed_documents(batch)
+            vectors = await asyncio.to_thread(self._embedding_model.embed_documents, batch)
             if len(vectors) != len(batch):
                 raise RuntimeError(
                     f"Embedding batch {i // self._embed_batch_size + 1} returned "

@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:15
@@ -11,45 +9,120 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-retrieva}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  milvus:
-    image: milvusdb/milvus:v2.3.0
-    command: ["milvus", "run", "standalone"]
+  # Milvus standalone requires etcd (metadata) and MinIO (object storage).
+  # Both were missing previously, so the milvus service could never start.
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
     environment:
-      MILVUS_DEPLOY_MODE: standalone
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - minio_data:/minio_data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # 2.5.x — sparse vectors (SPARSE_INVERTED_INDEX) used by hybrid search need
+  # Milvus >= 2.4; the previous v2.3.0 pin could not support them.
+  milvus:
+    image: milvusdb/milvus:v2.5.4
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_REGION: us-east-1
+    volumes:
+      - milvus_data:/var/lib/milvus
     ports:
       - "19530:19530"
       - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
     depends_on:
-      - postgres
-      - redis
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   backend:
     build: .
-    volumes:
-      - ./retrieva:/app/retrieva
     ports:
       - "9090:9090"
+    # Supplies GOOGLE_API_KEY / OPENAI_API_KEY and any other overrides.
+    # Without this the container has no LLM credentials. Optional so a fresh
+    # clone without a .env still starts (copy .env.example to .env to set keys).
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      # Service addresses override whatever .env has for local (host) use.
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-retrieva}
       - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_PORT=5432
+      - USE_SQLITE=false
       - REDIS_HOST=redis
-      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PORT=6379
       - MILVUS_HOST=milvus
-      - MILVUS_PORT=${MILVUS_PORT}
-      - MILVUS_DEFAULT_COLLECTION=${MILVUS_DEFAULT_COLLECTION}
+      - MILVUS_PORT=19530
+      # milvus_uri is what the code actually connects with — it was never set
+      # here before, so the backend dialled localhost inside its own container.
+      - MILVUS_URI=http://milvus:19530
     depends_on:
-      - postgres
-      - redis
-      - milvus
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
