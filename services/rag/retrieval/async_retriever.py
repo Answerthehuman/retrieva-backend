@@ -67,10 +67,12 @@ class AsyncRetriever:
         if self.embedding_function is None:
             raise RuntimeError("embedding_function is required")
 
+        # Embedding providers expose a synchronous HTTP client; calling it inline
+        # would block the event loop for the duration of the round trip.
         if hasattr(self.embedding_function, "embed_query"):
-            embedding = self.embedding_function.embed_query(query)
+            embedding = await asyncio.to_thread(self.embedding_function.embed_query, query)
         elif callable(self.embedding_function):
-            embedding = self.embedding_function(query)
+            embedding = await asyncio.to_thread(self.embedding_function, query)
         else:
             raise TypeError("embedding_function must be a callable or have an embed_query method")
 
@@ -149,11 +151,15 @@ class AsyncRetriever:
 
         t0 = datetime.now()
         if hasattr(self.embedding_function, "embed_documents"):
-            embeddings = self.embedding_function.embed_documents(queries)
+            embeddings = await asyncio.to_thread(self.embedding_function.embed_documents, queries)
         elif hasattr(self.embedding_function, "embed_query"):
-            embeddings = [self.embedding_function.embed_query(q) for q in queries]
+            embeddings = await asyncio.to_thread(
+                lambda: [self.embedding_function.embed_query(q) for q in queries]
+            )
         elif callable(self.embedding_function):
-            embeddings = [self.embedding_function(q) for q in queries]
+            embeddings = await asyncio.to_thread(
+                lambda: [self.embedding_function(q) for q in queries]
+            )
         else:
             raise TypeError("embedding_function must be a callable, or have embed_documents/embed_query methods")
         logger.info(_tlog(f"[bulk] embed {len(queries)} quer{'y' if len(queries)==1 else 'ies'}", t0, datetime.now()))

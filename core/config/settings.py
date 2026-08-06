@@ -28,16 +28,32 @@ class Settings(BaseSettings):
     milvus_default_collection: str = Field("retrieva_docs", env="MILVUS_DEFAULT_COLLECTION")
 
     # ── LLM Provider ─────────────────────────────────────────────────────────
-    llm_provider: str = Field("gemini", env="LLM_PROVIDER")  # "gemini" | "openai"
-    llm_model: str = Field("gemini-2.5-flash", env="LLM_MODEL")
+    # Claude handles every augmentation call: agent generation, metadata-filter
+    # extraction, document summarization, and PDF vision OCR.
+    llm_provider: str = Field("anthropic", env="LLM_PROVIDER")  # "anthropic" | "gemini" | "openai"
+    llm_model: str = Field("claude-opus-5", env="LLM_MODEL")
+    # Ignored on Claude 5 / Opus 4.7+ models, which reject sampling parameters
+    # with a 400. Retained for the Gemini/OpenAI fallback paths.
     llm_temperature: float = Field(0.0, env="LLM_TEMPERATURE")
+    llm_max_tokens: int = Field(16000, env="LLM_MAX_TOKENS")
+    # Adaptive thinking. Off by default — the agent makes many short
+    # tool-routing calls where thinking is spend without benefit.
+    llm_thinking_enabled: bool = Field(False, env="LLM_THINKING_ENABLED")
+    # low | medium | high | xhigh | max. None leaves the server default (high).
+    llm_effort: Optional[str] = Field(None, env="LLM_EFFORT")
 
     # ── Embeddings ────────────────────────────────────────────────────────────
-    embedding_provider: str = Field("gemini", env="EMBEDDING_PROVIDER")  # "gemini" | "openai"
-    embedding_model: str = Field("models/gemini-embedding-2", env="EMBEDDING_MODEL")
-    embedding_dim: int = Field(3072, env="EMBEDDING_DIM")
+    # Anthropic has no embeddings endpoint, so vectors come from a local
+    # open-source model served by Ollama.
+    embedding_provider: str = Field("ollama", env="EMBEDDING_PROVIDER")  # "ollama" | "gemini" | "openai"
+    embedding_model: str = Field("nomic-embed-text", env="EMBEDDING_MODEL")
+    # MUST match the model's vector width — it is baked into the Milvus schema
+    # at collection-creation time. nomic-embed-text=768, bge-m3=1024.
+    embedding_dim: int = Field(768, env="EMBEDDING_DIM")
+    ollama_base_url: str = Field("http://localhost:11434", env="OLLAMA_BASE_URL")
 
     # ── API Keys ──────────────────────────────────────────────────────────────
+    anthropic_api_key: Optional[str] = Field(None, env="ANTHROPIC_API_KEY")
     google_api_key: Optional[str] = Field(None, env="GOOGLE_API_KEY")
     openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
 

@@ -88,6 +88,38 @@ services:
       minio:
         condition: service_healthy
 
+  # Serves the open-source embedding model. Anthropic has no embeddings
+  # endpoint, so retrieval vectors are generated locally here.
+  # The model is pulled on first start into the named volume (see `ollama-pull`).
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # One-shot: pulls the embedding model, then exits. Keeps the backend from
+  # starting before the model is actually available.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "ollama pull ${EMBEDDING_MODEL:-nomic-embed-text} && echo 'embedding model ready'"
+    restart: "no"
+
   backend:
     build: .
     ports:
@@ -113,6 +145,8 @@ services:
       # milvus_uri is what the code actually connects with — it was never set
       # here before, so the backend dialled localhost inside its own container.
       - MILVUS_URI=http://milvus:19530
+      # Embeddings are served by the ollama container, not localhost.
+      - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,9 +154,12 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
   etcd_data:
   minio_data:
   milvus_data:
+  ollama_data:

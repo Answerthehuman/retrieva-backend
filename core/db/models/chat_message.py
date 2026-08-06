@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, JSON, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -12,6 +12,9 @@ class ChatMessage(Base):
     session_id = Column(String(255), ForeignKey("sessions.session_id"), nullable=False, index=True)
     message_type = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
+    # Documents actually retrieved for this answer, so citations survive a
+    # reload instead of being reconstructed (or invented) by the client.
+    sources = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     session = relationship("Session", back_populates="chat_messages")

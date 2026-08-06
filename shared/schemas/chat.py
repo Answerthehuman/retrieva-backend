@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,3 +25,17 @@ class SendMessageRequest(BaseModel):
     message: str = Field(..., description="User message/question", min_length=1)
     email: Optional[str] = Field(None, description="Optional email for metadata filtering")
     filters: Optional[str] = Field(None, description="Optional filter expression")
+    collection_name: Optional[str] = Field(
+        None, description="Milvus collection to search; falls back to the server default"
+    )
+
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    role: str = Field(..., description='"user" or "assistant"')
+    content: str
+    sources: Optional[List[Dict[str, Any]]] = None
+    created_at: str
+
+    class Config:
+        from_attributes = True

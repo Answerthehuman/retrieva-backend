@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
+from core.utils.errors import friendly_error
 from services.rag.ingestion.service import IngestionService
 from shared.schemas.ingest import IngestResponse
 
@@ -40,7 +41,7 @@ async def upload_document(
         )
         return IngestResponse(**stats)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=friendly_error(e))
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

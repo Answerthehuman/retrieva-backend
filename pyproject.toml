@@ -24,6 +24,10 @@ langgraph = "^0.6.0"
 
 # Native LLM & Embeddings
 langchain-core = "^0.3.0"
+# Claude is the augmentation/generation provider for every LLM call.
+langchain-anthropic = "^0.3.0"
+# Ollama serves the open-source embedding model locally.
+langchain-ollama = "^0.2.0"
 langchain-openai = "^0.3.0"
 langchain-google-genai = "^2.0.0"
 

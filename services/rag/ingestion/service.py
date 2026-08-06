@@ -122,8 +122,15 @@ class IngestionService:
         pages = await asyncio.to_thread(self.parser.parse_pages, file_path)
 
         if not pages:
+            # Must satisfy IngestResponse in full — returning a partial dict
+            # here used to raise a ValidationError and surface as a 500.
             logger.warning("No text extracted from %s", file_path)
-            return {"inserted": 0, "collection_name": target_collection}
+            return {
+                "inserted": 0,
+                "collection_name": target_collection,
+                "file_name": source_name or str(file_path),
+                "document_summary": "",
+            }
             
         # 2. Chunk
         logger.info("Chunking %d pages", len(pages))

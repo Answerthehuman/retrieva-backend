@@ -62,8 +62,12 @@ class RAGPipeline:
         }
         config = {"recursion_limit": self.settings.agent_max_tool_calls * 2 + 1}
 
-        current_chunks: List[str] = []
-        running_accum = None
+        # Tokens are forwarded the moment they arrive. A chunk that belongs to a
+        # tool-call decision carries no text content (the payload lives in
+        # tool_call_chunks), so emitting only non-empty content never leaks the
+        # agent's internal tool plumbing into the answer stream.
+        streaming = False
+        emitted_any = False
 
         async for event in self.graph.astream_events(initial_state, config=config, version="v2"):
             kind = event["event"]
@@ -82,18 +86,32 @@ class RAGPipeline:
 
             elif kind == "on_chat_model_stream" and node == "agent":
                 chunk = event["data"]["chunk"]
-                running_accum = chunk if running_accum is None else running_accum + chunk
-                if chunk.content:
-                    current_chunks.append(chunk.content)
+                text = chunk.content
+                # Some providers emit content as a list of parts rather than a str.
+                if isinstance(text, list):
+                    text = "".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in text
+                    )
+                if not text:
+                    continue
+                if not streaming:
+                    streaming = True
+                    emitted_any = True
+                    yield format_sse_event("event", {"format": "generation_start"})
+                yield format_sse_event("token", {"format": "markdown", "content": text})
 
             elif kind == "on_chat_model_end" and node == "agent":
-                # The merged chunk's .tool_calls only resolves once every
-                # tool_call_chunk has arrived — this is how we know, after the
-                # fact, whether this turn was a tool decision or the final answer.
-                if running_accum is not None and not running_accum.tool_calls and current_chunks:
-                    yield format_sse_event("event", {"format": "generation_start"})
-                    for piece in current_chunks:
-                        yield format_sse_event("token", {"format": "markdown", "content": piece})
+                if streaming:
                     yield format_sse_event("event", {"format": "generation_complete"})
-                current_chunks = []
-                running_accum = None
+                    streaming = False
+
+        # Guarantee the client always sees a terminal event, even when the agent
+        # produced no text at all (e.g. every turn was a tool call that failed).
+        if not emitted_any:
+            yield format_sse_event("event", {"format": "generation_start"})
+            yield format_sse_event(
+                "token",
+                {"format": "markdown", "content": "I wasn't able to produce an answer for that."},
+            )
+            yield format_sse_event("event", {"format": "generation_complete"})
