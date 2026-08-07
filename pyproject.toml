@@ -2,7 +2,8 @@
 name = "backend"
 version = "0.1.0"
 description = "Generic hybrid RAG backend"
-authors = ["OpenAI <assistant@example.com>"]
+authors = ["Retrieva <team@retrieva.dev>"]
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -11,10 +12,66 @@ uvicorn = {extras = ["standard"], version = "^0.24.0"}
 sqlalchemy = "^2.0.4"
 psycopg2-binary = "^2.9.12"
 redis = "^5.3.1"
-pymilvus = "^2.3.0"
+pymilvus = "^2.4.0"
 python-dotenv = "^1.0.1"
 pydantic = "^2.10.12"
+pydantic-settings = "^2.0"
 requests = "^2.31.0"
+python-multipart = "^0.0.20"
+
+# Orchestration
+langgraph = "^1.2.0"
+
+# Native LLM & Embeddings — the whole stack is pinned to the 1.x line
+# together: langchain-google-genai's Gemini-3.x support (thinking_level /
+# reasoning_effort — the old thinking_budget integer is a 400 on Gemini 3.x)
+# only ships on >=3.0, which requires langchain-core >=1.x. Every other
+# provider package here already has a current 1.x release, so this is a
+# coordinated bump, not a partial/broken one.
+langchain-core = "^1.5.0"
+# Claude is the augmentation/generation provider for every LLM call.
+langchain-anthropic = "^1.5.0"
+# Ollama serves the open-source embedding model locally.
+langchain-ollama = "^1.1.0"
+langchain-openai = "^1.4.0"
+langchain-google-genai = "^4.3.0"
+
+# Observability. Traces every agent run, tool call, and LLM generation.
+# langfuse itself is OpenTelemetry-based and declares no langchain dependency,
+# but its LangChain CallbackHandler imports the umbrella `langchain` package,
+# so that has to be present too. The umbrella's only hard deps are
+# langchain-core, langgraph, and pydantic — every provider is an optional
+# extra we don't request — so it doesn't disturb the pinned 1.x stack.
+langfuse = "^4.14.0"
+langchain = "^1.3.0"
+
+# Parsing & Chunking
+pymupdf = "^1.24.0"
+python-docx = "^1.1.0"
+# Imported directly by the docx/excel parser strategies; `tabulate` backs
+# DataFrame.to_markdown(). Previously only present transitively.
+pandas = "^2.2.0"
+tabulate = "^0.9.0"
+langchain-text-splitters = "^1.0.0"
+
+# Reranking (OPTIONAL — off by default via RERANK_ENABLED=false).
+#
+# This single line pulls in torch, which on Linux drags 14 `nvidia-cu12-*`
+# CUDA packages + triton (~3 GB) behind a `platform_system == "Linux"` marker.
+# They are invisible on Windows/macOS, which is why a working local venv can
+# still blow up a Linux container build.
+#
+# The reranker degrades gracefully when this is absent (Reranker.rerank()
+# catches ImportError and returns the original ordering), so the default
+# install omits it entirely.
+#
+#   Local, with reranking:  poetry install --extras rerank
+#   Docker, with reranking: docker compose build --build-arg INSTALL_RERANK=true
+#                           (installs the CPU-only torch wheel, ~200 MB not ~3 GB)
+sentence-transformers = {version = "^3.0.0", optional = true}
+
+[tool.poetry.extras]
+rerank = ["sentence-transformers"]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

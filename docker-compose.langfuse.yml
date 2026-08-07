@@ -1,0 +1,96 @@
+# Self-hosted Langfuse — OPT-IN OVERLAY, not part of the default stack.
+#
+# ⚠️  READ THE MEMORY MATH BEFORE RUNNING THIS ON THIS MACHINE.
+#
+# Langfuse v3 needs ClickHouse plus a web and a worker process. Realistic
+# footprint is ~3–4 GB. This host has 5.9 GB of RAM total; the WSL2 VM is
+# capped at 3.5 GB (see ~/.wslconfig) and the existing Retrieva stack already
+# leaves only ~2.1 GB free. Starting this alongside it will almost certainly
+# push the VM into the OOM → hard-kill → lost-containerd-metadata failure mode
+# that previously wiped this machine's Docker images and volumes
+# (see project_context.md, 2026-08-07b).
+#
+# On this hardware, prefer Langfuse Cloud's free tier — the application code is
+# identical, only LANGFUSE_HOST differs:
+#     LANGFUSE_HOST=https://cloud.langfuse.com
+#
+# If you DO have headroom (16 GB+ host, or the Retrieva stack stopped):
+#     docker compose -f docker-compose.yml -f docker-compose.langfuse.yml up -d
+# then set in .env:
+#     LANGFUSE_HOST=http://langfuse-web:3000
+#
+# Generate keys in the Langfuse UI at http://localhost:3001 after first boot.
+
+services:
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &langfuse-env
+      # Reuses the Retrieva stack's postgres/redis/minio rather than standing up
+      # duplicates — the whole point is to minimise footprint on a small host.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT:-changeme-salt-please-override}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-changeme-nextauth-secret}
+      NEXTAUTH_URL: http://localhost:3001
+      TELEMETRY_ENABLED: "false"
+
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: minioadmin
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    depends_on:
+      langfuse-worker:
+        condition: service_started
+    ports:
+      # 3001 on the host: 3000 is a common dev-server port and this is a
+      # secondary tool, so it yields rather than squatting the obvious one.
+      - "3001:3000"
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: retrieva
+      LANGFUSE_INIT_PROJECT_ID: retrieva
+
+volumes:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:

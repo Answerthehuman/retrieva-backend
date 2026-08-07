@@ -1,72 +1,150 @@
-from typing import List
+import logging
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-try:
-    from pymilvus import connections, utility, Collection
-except ImportError:
-    connections = None
-    utility = None
-    Collection = None
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from agents.prompts import build_system_prompt
+from agents.state import history_to_messages
+from core.config.settings import get_settings
+from core.observability import build_callbacks, trace_metadata
+from core.providers import get_agent_graph
+from core.utils.sse import format_sse_event
+
+logger = logging.getLogger(__name__)
+
+
+def _strip_vectors(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {k: v for k, v in doc.items() if k not in ("dense_vector", "sparse_vector", "embedding")}
+        for doc in documents
+    ]
 
 
 class RAGPipeline:
-    def __init__(self, collection_name: str = "retrieva_docs"):
-        self.collection_name = collection_name
-        self._connect_milvus()
+    """Thin adapter around the compiled LangGraph agent — preserves the query() call
+    signature used by cli.py and api/routes/chat.py, translating the agent's
+    astream_events stream into the same SSE event contract as before."""
 
-    def _connect_milvus(self) -> None:
-        if connections is None:
-            return
-        connections.connect(
-            alias="default",
-            host="localhost",
-            port="19530",
+    def __init__(self):
+        self.settings = get_settings()
+        self.graph = get_agent_graph(self.settings)
+
+    async def query(
+        self,
+        query_text: str,
+        collection_name: Optional[str] = None,
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        filters: Optional[str] = None,
+        mode: Optional[str] = None,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Run the agent end-to-end, yielding SSE events.
+
+        Args:
+            query_text: The user's query.
+            collection_name: Milvus collection to search.
+            chat_history: Previous messages [{"role": "user", "content": "..."}, ...]
+            filters: Optional caller-supplied Milvus filter expression, merged with
+                any filter the agent's search tool extracts from the query itself.
+            mode: Optional action mode (summarise | insights | analyse | explain)
+                that specialises the system prompt. Unknown values fall back to
+                normal chat.
+            session_id: Chat session id, attached to the Langfuse trace so a
+                conversation's turns group together rather than appearing as
+                unrelated one-off traces.
+            user_id: Optional user identifier for the trace.
+
+        Yields:
+            JSON-encoded Server-Sent Events (SSE) strings.
+        """
+        target_collection = collection_name or self.settings.milvus_default_collection
+
+        # The mode shapes behaviour through the system prompt — an operator
+        # channel — rather than being prepended to the user's message. That
+        # keeps it out of the transcript, out of chat history replayed on later
+        # turns, and un-editable by the user, which is what makes it read as a
+        # mode rather than as pre-filled prompt text.
+        messages = (
+            [SystemMessage(content=build_system_prompt(mode))]
+            + history_to_messages(chat_history)
+            + [HumanMessage(content=query_text)]
         )
+        if mode:
+            logger.info("Agent mode active: %s", mode)
+        initial_state = {
+            "messages": messages,
+            "collection_name": target_collection,
+            "base_filters": filters,
+        }
+        # Langfuse traces the whole agent run through LangChain's callback
+        # mechanism: every node, tool call, retrieval, and LLM generation shows
+        # up as a nested span under one trace. Empty list when tracing is off,
+        # which LangGraph treats as a no-op.
+        config: Dict[str, Any] = {
+            "recursion_limit": self.settings.agent_max_tool_calls * 2 + 1,
+            "callbacks": build_callbacks(self.settings),
+            "metadata": trace_metadata(
+                session_id=session_id,
+                user_id=user_id,
+                name=f"chat:{mode}" if mode else "chat",
+                tags=[t for t in ("retrieva", mode) if t],
+                collection=target_collection,
+                mode=mode,
+            ),
+        }
 
-    def retrieve(self, query_text: str) -> List[dict]:
-        if utility is None:
-            return [
-                {
-                    "id": "demo-1",
-                    "title": "Retrieva demo document",
-                    "content": "Retrieva can answer questions by combining vector retrieval and generation.",
-                }
-            ]
+        # Tokens are forwarded the moment they arrive. A chunk that belongs to a
+        # tool-call decision carries no text content (the payload lives in
+        # tool_call_chunks), so emitting only non-empty content never leaks the
+        # agent's internal tool plumbing into the answer stream.
+        streaming = False
+        emitted_any = False
 
-        if not utility.has_collection(self.collection_name):
-            return []
+        async for event in self.graph.astream_events(initial_state, config=config, version="v2"):
+            kind = event["event"]
+            node = event.get("metadata", {}).get("langgraph_node")
 
-        collection = Collection(self.collection_name)
-        search_params = {"metric_type": "L2", "params": {"nprobe": 8}}
-        results = collection.search(
-            data=[query_text],
-            anns_field="embeddings",
-            param=search_params,
-            limit=3,
-            expr=None,
-            output_fields=["title", "content"],
-        )
+            if kind == "on_tool_start" and event["name"] == "search_knowledge_base":
+                query_arg = event.get("data", {}).get("input", {}).get("query")
+                yield format_sse_event("event", {"format": "retrieval_start", "query": query_arg})
 
-        documents = []
-        for hits in results:
-            for hit in hits:
-                documents.append({
-                    "id": str(hit.id),
-                    "title": hit.entity.get("title"),
-                    "content": hit.entity.get("content"),
-                })
-        return documents
+            elif kind == "on_tool_end" and event["name"] == "search_knowledge_base":
+                tool_message = event.get("data", {}).get("output")
+                docs = getattr(tool_message, "artifact", None) or []
+                yield format_sse_event(
+                    "event", {"format": "retrieval_complete", "documents": _strip_vectors(docs)}
+                )
 
-    def rerank(self, documents: List[dict], query_text: str) -> List[dict]:
-        return documents
+            elif kind == "on_chat_model_stream" and node == "agent":
+                chunk = event["data"]["chunk"]
+                text = chunk.content
+                # Some providers emit content as a list of parts rather than a str.
+                if isinstance(text, list):
+                    text = "".join(
+                        part.get("text", "") if isinstance(part, dict) else str(part)
+                        for part in text
+                    )
+                if not text:
+                    continue
+                if not streaming:
+                    streaming = True
+                    emitted_any = True
+                    yield format_sse_event("event", {"format": "generation_start"})
+                yield format_sse_event("token", {"format": "markdown", "content": text})
 
-    def generate(self, query_text: str, documents: List[dict]) -> List[str]:
-        return [
-            f"Retrieva retrieved {len(documents)} document(s).",
-            f"Answer: {query_text}",
-        ]
+            elif kind == "on_chat_model_end" and node == "agent":
+                if streaming:
+                    yield format_sse_event("event", {"format": "generation_complete"})
+                    streaming = False
 
-    def query(self, query_text: str) -> dict:
-        documents = self.retrieve(query_text)
-        ranked = self.rerank(documents, query_text)
-        response = self.generate(query_text, ranked)
-        return {"documents": ranked, "response": response}
+        # Guarantee the client always sees a terminal event, even when the agent
+        # produced no text at all (e.g. every turn was a tool call that failed).
+        if not emitted_any:
+            yield format_sse_event("event", {"format": "generation_start"})
+            yield format_sse_event(
+                "token",
+                {"format": "markdown", "content": "I wasn't able to produce an answer for that."},
+            )
+            yield format_sse_event("event", {"format": "generation_complete"})

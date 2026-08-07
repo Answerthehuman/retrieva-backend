@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:15
@@ -11,45 +9,197 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-retrieva}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  milvus:
-    image: milvusdb/milvus:v2.3.0
-    command: ["milvus", "run", "standalone"]
+  # Milvus standalone requires etcd (metadata) and MinIO (object storage).
+  # Both were missing previously, so the milvus service could never start.
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
     environment:
-      MILVUS_DEPLOY_MODE: standalone
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - minio_data:/minio_data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # 2.5.x — sparse vectors (SPARSE_INVERTED_INDEX) used by hybrid search need
+  # Milvus >= 2.4; the previous v2.3.0 pin could not support them.
+  milvus:
+    image: milvusdb/milvus:v2.5.4
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_REGION: us-east-1
+    volumes:
+      - milvus_data:/var/lib/milvus
     ports:
       - "19530:19530"
       - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
     depends_on:
-      - postgres
-      - redis
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # NOTE: Ollama runs natively on the HOST, not as a container.
+  #
+  # This machine has 5.9 GB of RAM. WSL2 gives Docker's VM ~3.5 GB (see
+  # ~/.wslconfig), and Milvus + etcd + MinIO + Postgres + Redis + the backend
+  # already consume nearly all of it. Adding Ollama and its embedding model
+  # (~1-1.5 GB) pushed the VM past its ceiling; it was being killed mid-pull,
+  # and every hard kill lost containerd's uncommitted metadata — which is why
+  # images and volumes kept disappearing after apparently successful pulls.
+  #
+  # Running Ollama on the host keeps that memory outside the VM entirely and
+  # lets it use the host GPU if one is available.
+  #
+  #   winget install Ollama.Ollama
+  #   ollama pull nomic-embed-text
+  #
+  # The backend reaches it via host.docker.internal (see OLLAMA_BASE_URL below).
+  # To run it as a container instead, use the `ollama` profile:
+  #   docker compose --profile ollama up -d
+  # and set OLLAMA_BASE_URL=http://ollama:11434.
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ollama-pull:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "ollama pull ${EMBEDDING_MODEL:-nomic-embed-text} && echo 'embedding model ready'"
+    restart: "no"
 
   backend:
-    build: .
-    volumes:
-      - ./retrieva:/app/retrieva
+    build:
+      context: .
+      args:
+        # Reranking is opt-in: it pulls torch (~200 MB CPU-only wheel; ~3 GB if
+        # it came from PyPI with the CUDA stack). Leave false unless you also
+        # set RERANK_ENABLED=true — the reranker no-ops without the package.
+        INSTALL_RERANK: ${INSTALL_RERANK:-false}
     ports:
       - "9090:9090"
+    # Supplies GOOGLE_API_KEY / OPENAI_API_KEY and any other overrides.
+    # Without this the container has no LLM credentials. Optional so a fresh
+    # clone without a .env still starts (copy .env.example to .env to set keys).
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      # Service addresses override whatever .env has for local (host) use.
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-retrieva}
       - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_PORT=5432
+      - USE_SQLITE=false
       - REDIS_HOST=redis
-      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PORT=6379
       - MILVUS_HOST=milvus
-      - MILVUS_PORT=${MILVUS_PORT}
-      - MILVUS_DEFAULT_COLLECTION=${MILVUS_DEFAULT_COLLECTION}
+      - MILVUS_PORT=19530
+      # milvus_uri is what the code actually connects with — it was never set
+      # here before, so the backend dialled localhost inside its own container.
+      - MILVUS_URI=http://milvus:19530
+      # Ollama runs on the host (see the note on the `ollama` service above),
+      # so reach it through the host gateway rather than a container name.
+      #
+      # Deliberately NOT `${OLLAMA_BASE_URL:-...}`: Compose interpolates ${...}
+      # from the project .env, where OLLAMA_BASE_URL is http://localhost:11434
+      # for running the backend outside Docker. That value would win over the
+      # default and point the container at *itself*. The override variable is
+      # named differently so the two cannot collide.
+      #   Container Ollama:  COMPOSE_OLLAMA_URL=http://ollama:11434 \
+      #                      docker compose --profile ollama up -d
+      - OLLAMA_BASE_URL=${COMPOSE_OLLAMA_URL:-http://host.docker.internal:11434}
+    # Docker Desktop resolves host.docker.internal automatically, but declaring
+    # it keeps this working on plain Docker Engine / Linux hosts too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # BM25 vocabulary/IDF stats are the source of truth for hybrid search
+      # (Redis only caches them). Without this volume they are lost on every
+      # rebuild, so previously-ingested documents become unscoreable by the
+      # sparse half of the hybrid query.
+      - bm25_data:/app/data
     depends_on:
-      - postgres
-      - redis
-      - milvus
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
 
 volumes:
   postgres_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+  ollama_data:
+  bm25_data:
