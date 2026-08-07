@@ -1,5 +1,12 @@
 """Graph state for the Retrieva agent."""
-from typing import Annotated, Any, Dict, List, Optional, TypedDict
+from typing import Annotated, Any, Dict, List, Optional
+
+# Must come from typing_extensions, not typing, on Python < 3.12. Pydantic (via
+# LangGraph's state schema validation) rejects typing.TypedDict there, because
+# older CPython versions don't propagate __required_keys__/Annotated metadata
+# the way Pydantic needs. On 3.11 this surfaced only at graph-invocation time as
+# "Please use `typing_extensions.TypedDict` instead of `typing.TypedDict`".
+from typing_extensions import TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages

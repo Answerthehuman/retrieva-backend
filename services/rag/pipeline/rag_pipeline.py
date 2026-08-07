@@ -3,9 +3,10 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agents.prompts import SYSTEM_PROMPT
+from agents.prompts import build_system_prompt
 from agents.state import history_to_messages
 from core.config.settings import get_settings
+from core.observability import build_callbacks, trace_metadata
 from core.providers import get_agent_graph
 from core.utils.sse import format_sse_event
 
@@ -34,6 +35,9 @@ class RAGPipeline:
         collection_name: Optional[str] = None,
         chat_history: Optional[List[Dict[str, str]]] = None,
         filters: Optional[str] = None,
+        mode: Optional[str] = None,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Run the agent end-to-end, yielding SSE events.
@@ -44,23 +48,52 @@ class RAGPipeline:
             chat_history: Previous messages [{"role": "user", "content": "..."}, ...]
             filters: Optional caller-supplied Milvus filter expression, merged with
                 any filter the agent's search tool extracts from the query itself.
+            mode: Optional action mode (summarise | insights | analyse | explain)
+                that specialises the system prompt. Unknown values fall back to
+                normal chat.
+            session_id: Chat session id, attached to the Langfuse trace so a
+                conversation's turns group together rather than appearing as
+                unrelated one-off traces.
+            user_id: Optional user identifier for the trace.
 
         Yields:
             JSON-encoded Server-Sent Events (SSE) strings.
         """
         target_collection = collection_name or self.settings.milvus_default_collection
 
+        # The mode shapes behaviour through the system prompt — an operator
+        # channel — rather than being prepended to the user's message. That
+        # keeps it out of the transcript, out of chat history replayed on later
+        # turns, and un-editable by the user, which is what makes it read as a
+        # mode rather than as pre-filled prompt text.
         messages = (
-            [SystemMessage(content=SYSTEM_PROMPT)]
+            [SystemMessage(content=build_system_prompt(mode))]
             + history_to_messages(chat_history)
             + [HumanMessage(content=query_text)]
         )
+        if mode:
+            logger.info("Agent mode active: %s", mode)
         initial_state = {
             "messages": messages,
             "collection_name": target_collection,
             "base_filters": filters,
         }
-        config = {"recursion_limit": self.settings.agent_max_tool_calls * 2 + 1}
+        # Langfuse traces the whole agent run through LangChain's callback
+        # mechanism: every node, tool call, retrieval, and LLM generation shows
+        # up as a nested span under one trace. Empty list when tracing is off,
+        # which LangGraph treats as a no-op.
+        config: Dict[str, Any] = {
+            "recursion_limit": self.settings.agent_max_tool_calls * 2 + 1,
+            "callbacks": build_callbacks(self.settings),
+            "metadata": trace_metadata(
+                session_id=session_id,
+                user_id=user_id,
+                name=f"chat:{mode}" if mode else "chat",
+                tags=[t for t in ("retrieva", mode) if t],
+                collection=target_collection,
+                mode=mode,
+            ),
+        }
 
         # Tokens are forwarded the moment they arrive. A chunk that belongs to a
         # tool-call decision carries no text content (the payload lives in

@@ -88,10 +88,27 @@ services:
       minio:
         condition: service_healthy
 
-  # Serves the open-source embedding model. Anthropic has no embeddings
-  # endpoint, so retrieval vectors are generated locally here.
-  # The model is pulled on first start into the named volume (see `ollama-pull`).
+  # NOTE: Ollama runs natively on the HOST, not as a container.
+  #
+  # This machine has 5.9 GB of RAM. WSL2 gives Docker's VM ~3.5 GB (see
+  # ~/.wslconfig), and Milvus + etcd + MinIO + Postgres + Redis + the backend
+  # already consume nearly all of it. Adding Ollama and its embedding model
+  # (~1-1.5 GB) pushed the VM past its ceiling; it was being killed mid-pull,
+  # and every hard kill lost containerd's uncommitted metadata — which is why
+  # images and volumes kept disappearing after apparently successful pulls.
+  #
+  # Running Ollama on the host keeps that memory outside the VM entirely and
+  # lets it use the host GPU if one is available.
+  #
+  #   winget install Ollama.Ollama
+  #   ollama pull nomic-embed-text
+  #
+  # The backend reaches it via host.docker.internal (see OLLAMA_BASE_URL below).
+  # To run it as a container instead, use the `ollama` profile:
+  #   docker compose --profile ollama up -d
+  # and set OLLAMA_BASE_URL=http://ollama:11434.
   ollama:
+    profiles: ["ollama"]
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
@@ -104,9 +121,8 @@ services:
       retries: 10
       start_period: 30s
 
-  # One-shot: pulls the embedding model, then exits. Keeps the backend from
-  # starting before the model is actually available.
   ollama-pull:
+    profiles: ["ollama"]
     image: ollama/ollama:latest
     depends_on:
       ollama:
@@ -121,7 +137,13 @@ services:
     restart: "no"
 
   backend:
-    build: .
+    build:
+      context: .
+      args:
+        # Reranking is opt-in: it pulls torch (~200 MB CPU-only wheel; ~3 GB if
+        # it came from PyPI with the CUDA stack). Leave false unless you also
+        # set RERANK_ENABLED=true — the reranker no-ops without the package.
+        INSTALL_RERANK: ${INSTALL_RERANK:-false}
     ports:
       - "9090:9090"
     # Supplies GOOGLE_API_KEY / OPENAI_API_KEY and any other overrides.
@@ -145,8 +167,27 @@ services:
       # milvus_uri is what the code actually connects with — it was never set
       # here before, so the backend dialled localhost inside its own container.
       - MILVUS_URI=http://milvus:19530
-      # Embeddings are served by the ollama container, not localhost.
-      - OLLAMA_BASE_URL=http://ollama:11434
+      # Ollama runs on the host (see the note on the `ollama` service above),
+      # so reach it through the host gateway rather than a container name.
+      #
+      # Deliberately NOT `${OLLAMA_BASE_URL:-...}`: Compose interpolates ${...}
+      # from the project .env, where OLLAMA_BASE_URL is http://localhost:11434
+      # for running the backend outside Docker. That value would win over the
+      # default and point the container at *itself*. The override variable is
+      # named differently so the two cannot collide.
+      #   Container Ollama:  COMPOSE_OLLAMA_URL=http://ollama:11434 \
+      #                      docker compose --profile ollama up -d
+      - OLLAMA_BASE_URL=${COMPOSE_OLLAMA_URL:-http://host.docker.internal:11434}
+    # Docker Desktop resolves host.docker.internal automatically, but declaring
+    # it keeps this working on plain Docker Engine / Linux hosts too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # BM25 vocabulary/IDF stats are the source of truth for hybrid search
+      # (Redis only caches them). Without this volume they are lost on every
+      # rebuild, so previously-ingested documents become unscoreable by the
+      # sparse half of the hybrid query.
+      - bm25_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -154,8 +195,6 @@ services:
         condition: service_healthy
       milvus:
         condition: service_healthy
-      ollama-pull:
-        condition: service_completed_successfully
 
 volumes:
   postgres_data:
@@ -163,3 +202,4 @@ volumes:
   minio_data:
   milvus_data:
   ollama_data:
+  bm25_data:

@@ -41,7 +41,9 @@ class ImageDescriber:
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
             ])
             response = self._llm.invoke([message])
-            return f"[Image Description: {response.content}]"
+            # .text, not .content — some providers return a list of content
+            # blocks rather than a plain string; .text normalizes either shape.
+            return f"[Image Description: {response.text}]"
         except Exception as e:
             logger.error(f"Image description failed: {e}")
             return "[Image: Undescribed]"

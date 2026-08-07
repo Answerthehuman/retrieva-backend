@@ -28,6 +28,14 @@ class SendMessageRequest(BaseModel):
     collection_name: Optional[str] = Field(
         None, description="Milvus collection to search; falls back to the server default"
     )
+    mode: Optional[str] = Field(
+        None,
+        description=(
+            "Action mode shaping how the agent searches and structures its answer: "
+            "summarise | insights | analyse | explain. Omit for normal chat. "
+            "An unrecognised value degrades to normal chat rather than erroring."
+        ),
+    )
 
 
 class ChatMessageResponse(BaseModel):

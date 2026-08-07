@@ -26,29 +26,65 @@ def _check_database() -> dict:
         return {"status": "error", "engine": DATABASE_URL.split("://", 1)[0], "detail": str(e)[:200]}
 
 
+_LLM_ENV_VAR = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+
 def _check_llm(settings) -> dict:
-    """Configuration check only — deliberately does not spend a token."""
-    provider = settings.llm_provider
-    key = {
+    """Configuration check only — deliberately does not spend a token.
+
+    Reports the whole fallback chain, not just one provider: a chain whose
+    primary is unconfigured still works via its fallbacks, and a chain with
+    *no* configured provider is the real failure.
+    """
+    from core.providers import _resolve_provider_order
+
+    keys = {
         "anthropic": settings.anthropic_api_key,
         "gemini": settings.google_api_key,
         "openai": settings.openai_api_key,
-    }.get(provider)
+    }
+    models = {
+        "anthropic": settings.anthropic_model,
+        "gemini": settings.gemini_model,
+        "openai": settings.openai_model,
+    }
 
-    env_var = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "gemini": "GOOGLE_API_KEY",
-        "openai": "OPENAI_API_KEY",
-    }.get(provider, "the provider's API key")
+    chain = []
+    for name in _resolve_provider_order(settings):
+        chain.append({
+            "provider": name,
+            "model": models.get(name),
+            "configured": bool(keys.get(name)),
+            "env_var": _LLM_ENV_VAR.get(name),
+        })
 
-    if not key:
+    active = [c for c in chain if c["configured"]]
+    if not active:
+        missing = ", ".join(c["env_var"] for c in chain) or "an LLM API key"
         return {
             "status": "unconfigured",
-            "provider": provider,
-            "model": settings.llm_model,
-            "detail": f"{env_var} is not set.",
+            "chain": chain,
+            "detail": f"No LLM provider has an API key. Set one of: {missing}.",
         }
-    return {"status": "ok", "provider": provider, "model": settings.llm_model}
+
+    result = {
+        "status": "ok",
+        "primary": active[0]["provider"],
+        "model": active[0]["model"],
+        "chain": chain,
+        "active_providers": [c["provider"] for c in active],
+    }
+    skipped = [c["provider"] for c in chain if not c["configured"]]
+    if skipped:
+        result["detail"] = (
+            f"Skipped (no API key): {', '.join(skipped)}. "
+            "These are unavailable as fallbacks until their key is set."
+        )
+    return result
 
 
 async def _check_embeddings(settings) -> dict:

@@ -163,6 +163,11 @@ async def stream_message(session_id: str, request: SendMessageRequest):
                 collection_name=request.collection_name,
                 chat_history=chat_history,
                 filters=request.filters,
+                mode=request.mode,
+                # Groups every turn of this conversation under one Langfuse
+                # session instead of scattering them as unrelated traces.
+                session_id=session_id,
+                user_id=request.email,
             ):
                 yield sse_string
 

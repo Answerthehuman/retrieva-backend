@@ -67,7 +67,10 @@ def get_anthropic(
         # `budget_tokens` is removed on these models; adaptive is the only mode.
         kwargs["thinking"] = {"type": "adaptive"}
 
-    if effort is not None:
+    # Truthiness, not `is not None`: an unset `LLM_EFFORT=` in .env arrives as
+    # the empty string, which would otherwise send output_config={"effort": ""}
+    # and be rejected as an invalid effort level.
+    if effort:
         kwargs["output_config"] = {"effort": effort}
 
     if api_key is not None:

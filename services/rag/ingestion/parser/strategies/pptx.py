@@ -101,7 +101,9 @@ class PptxParserStrategy(ParserStrategy):
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
                     ])
                     response = self.vision_llm.invoke([message])
-                    slides.append({"text": response.content, "slide_number": i + 1})
+                    # .text, not .content — some providers return content as
+                    # a list of blocks; .text normalizes either shape.
+                    slides.append({"text": response.text, "slide_number": i + 1})
                 doc.close()
 
             return slides

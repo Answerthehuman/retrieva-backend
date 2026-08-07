@@ -1,19 +1,42 @@
+# Version control
 .git
 .gitignore
 .gitattributes
+
+# Python bytecode / caches
 __pycache__
 **/__pycache__
 *.py[cod]
-.venv
-venv
-.env
-*.db
-retrieva.db
-data/
 .pytest_cache
 .mypy_cache
 .ruff_cache
+
+# Local virtualenvs — never ship the host's venv into the build context.
+.venv
+venv
+env
+
+# Secrets and local databases
+.env
+.env.*
+!.env.example
+*.db
+retrieva.db
+
+# Local data / uploads / model caches
+data/
+uploads/
+.cache/
+huggingface/
+
+# Docs and container definitions (not needed inside the image)
 *.md
 docker-compose*.yml
 Dockerfile
 .dockerignore
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
+Thumbs.db

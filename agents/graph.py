@@ -7,9 +7,18 @@ from langgraph.prebuilt import ToolNode
 from agents.state import AgentState
 
 
-def build_agent_graph(*, llm, tools: List):
-    """Compile the agent graph: agent <-> tools, looping until the LLM answers without a tool call."""
-    llm_with_tools = llm.bind_tools(tools)
+def build_agent_graph(*, tools: List, llm=None, llm_with_tools=None):
+    """Compile the agent graph: agent <-> tools, looping until the LLM answers without a tool call.
+
+    Pass either `llm` (a chat model; tools are bound here) or `llm_with_tools`
+    (already bound). The latter exists because the provider fallback chain is a
+    RunnableWithFallbacks, which has no .bind_tools() — tools must be bound to
+    each concrete provider before the chain is assembled.
+    """
+    if llm_with_tools is None:
+        if llm is None:
+            raise ValueError("build_agent_graph requires either llm or llm_with_tools")
+        llm_with_tools = llm.bind_tools(tools)
 
     async def agent_node(state: AgentState) -> dict:
         response = await llm_with_tools.ainvoke(state["messages"])

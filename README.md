@@ -2,6 +2,10 @@
 
 Retrieva is a hybrid Retrieval‑Augmented Generation (RAG) system. It combines a FastAPI backend, PostgreSQL, Redis, and Milvus vector search to deliver hybrid semantic search and streamed chat responses.
 
+Attached is a screenshot of the homepage:
+
+![1786107114144](image/README/1786107114144.png)
+
 ## Architecture
 
 - FastAPI backend with SSE chat streaming
@@ -13,11 +17,13 @@ Retrieva is a hybrid Retrieval‑Augmented Generation (RAG) system. It combines 
 ## Quickstart
 
 ### Prerequisites
+
 - Python 3.11+
 - Docker & Docker‑Compose
 - Poetry (install via script below)
 
 ### Installation & setup
+
 ```bash
 # 1. Clone the repository
 git clone <repository‑url>
@@ -32,17 +38,20 @@ poetry shell
 ```
 
 ### Environment configuration
+
 ```bash
 cp .env.example .env   # edit the file if you need to change defaults
 ```
 
 ### Docker infrastructure
+
 ```bash
 # Start PostgreSQL, Redis, Milvus, and any other services
 docker compose up -d
 ```
 
 ### Database migrations (Alembic)
+
 ```bash
 # Initialise Alembic (run once)
 alembic init alembic
@@ -55,6 +64,7 @@ alembic upgrade head
 ```
 
 ### Running the API
+
 ```bash
 uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 9090
 # In a separate terminal you can start Celery workers if needed
@@ -65,12 +75,14 @@ uvicorn backend.api.main:app --reload --host 0.0.0.0 --port 9090
 Open `http://localhost:9090/docs` in a browser to explore the OpenAPI UI.
 
 ### Ingest & query example commands
+
 ```bash
 python cli.py ingest --source filesystem --collection my_docs --path ./data
 python cli.py query --collection my_docs "your question here"
 ```
 
 ### Documentation
+
 - `POETRY_SETUP.md` – detailed Poetry and Alembic instructions
 - `QUICKSTART.md` – this quick‑start guide
 - `DEPLOYMENT_GUIDE.md` – production deployment notes
@@ -78,4 +90,5 @@ python cli.py query --collection my_docs "your question here"
 - `MISSING_COMPONENTS.md` – roadmap for future features
 
 ## Notes
+
 This scaffold provides a working foundation for building a production‑ready RAG stack. Adjust the configuration in `.env` as needed for your environment.

@@ -10,6 +10,7 @@ from .routes.chat import router as chat_router
 from .routes.ingest import router as ingest_router
 from core.config.settings import get_settings
 from core.db.database import Base, engine
+from core.observability import flush as flush_langfuse, get_langfuse_handler
 from core.providers import close_retriever, get_llm, get_embeddings, get_retriever
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,11 @@ async def lifespan(app: FastAPI):
             factory(settings)
         except Exception as e:
             logger.warning("⚠️  %s unavailable at startup: %s", name, e)
+
+    # Resolve tracing once at startup so its status is visible in the boot log
+    # rather than only surfacing on the first chat turn.
+    get_langfuse_handler(settings)
+
     logger.info("✅ Startup complete")
 
     yield
@@ -51,6 +57,10 @@ async def lifespan(app: FastAPI):
         await close_retriever()
     except Exception as e:
         logger.warning("Error closing retriever: %s", e)
+
+    # Langfuse batches events in the background; without an explicit flush the
+    # final turns of a short-lived container are dropped on exit.
+    flush_langfuse()
 
 
 def create_app() -> FastAPI:

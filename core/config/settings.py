@@ -27,11 +27,27 @@ class Settings(BaseSettings):
     milvus_uri: str = Field("http://localhost:19530", env="MILVUS_URI")
     milvus_default_collection: str = Field("retrieva_docs", env="MILVUS_DEFAULT_COLLECTION")
 
-    # ── LLM Provider ─────────────────────────────────────────────────────────
-    # Claude handles every augmentation call: agent generation, metadata-filter
-    # extraction, document summarization, and PDF vision OCR.
-    llm_provider: str = Field("anthropic", env="LLM_PROVIDER")  # "anthropic" | "gemini" | "openai"
-    llm_model: str = Field("claude-opus-5", env="LLM_MODEL")
+    # ── LLM Providers (ordered fallback chain) ───────────────────────────────
+    # Comma-separated, highest priority first. Every augmentation call (agent
+    # generation, metadata-filter extraction, document summarization, PDF vision
+    # OCR) runs through this chain: if a provider errors — no credits, rate
+    # limit, transient 5xx — the next one is tried automatically.
+    #
+    # Providers with no API key configured are skipped when the chain is built,
+    # so listing one costs nothing until you supply its key.
+    llm_fallback_order: str = Field("gemini,anthropic,openai", env="LLM_FALLBACK_ORDER")
+
+    # Per-provider model ids. Each provider needs its own — a single LLM_MODEL
+    # cannot describe a chain whose members are different model families.
+    gemini_model: str = Field("gemini-3.5-flash-lite", env="GEMINI_MODEL")
+    anthropic_model: str = Field("claude-opus-5", env="ANTHROPIC_MODEL")
+    openai_model: str = Field("gpt-4o-mini", env="OPENAI_MODEL")
+
+    # Legacy single-provider settings. If llm_provider is set it is promoted to
+    # the head of the chain, so existing .env files keep their intended primary
+    # instead of silently changing behaviour. Prefer LLM_FALLBACK_ORDER.
+    llm_provider: Optional[str] = Field(None, env="LLM_PROVIDER")
+    llm_model: Optional[str] = Field(None, env="LLM_MODEL")
     # Ignored on Claude 5 / Opus 4.7+ models, which reject sampling parameters
     # with a 400. Retained for the Gemini/OpenAI fallback paths.
     llm_temperature: float = Field(0.0, env="LLM_TEMPERATURE")
@@ -56,6 +72,17 @@ class Settings(BaseSettings):
     anthropic_api_key: Optional[str] = Field(None, env="ANTHROPIC_API_KEY")
     google_api_key: Optional[str] = Field(None, env="GOOGLE_API_KEY")
     openai_api_key: Optional[str] = Field(None, env="OPENAI_API_KEY")
+
+    # ── Observability (Langfuse) ─────────────────────────────────────────────
+    # Opt-in and fail-open: with no keys set, tracing is inert and the app is
+    # unaffected. Works against Langfuse Cloud or a self-hosted instance — only
+    # LANGFUSE_HOST differs between them.
+    langfuse_enabled: bool = Field(True, env="LANGFUSE_ENABLED")
+    langfuse_public_key: Optional[str] = Field(None, env="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: Optional[str] = Field(None, env="LANGFUSE_SECRET_KEY")
+    # EU cloud: https://cloud.langfuse.com — US: https://us.cloud.langfuse.com
+    # Self-hosted: http://langfuse-web:3000 (see docker-compose.langfuse.yml)
+    langfuse_host: str = Field("https://cloud.langfuse.com", env="LANGFUSE_HOST")
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
     hybrid_search_enabled: bool = Field(True, env="HYBRID_SEARCH_ENABLED")

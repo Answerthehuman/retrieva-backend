@@ -65,7 +65,11 @@ async def extract_filters_from_query(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ])
-        parsed = _parse_llm_response(response.content.strip())
+        # .text, not .content — providers that return content as a list of
+        # blocks (Gemini 3.x confirmed) would make .content.strip() raise
+        # AttributeError outright, since list has no .strip(). .text
+        # normalizes either shape to plain text.
+        parsed = _parse_llm_response(response.text.strip())
         logger.info(f"Extracted filter: {parsed.get('milvus_expression')}")
         return {
             "milvus_expression": parsed.get("milvus_expression"),

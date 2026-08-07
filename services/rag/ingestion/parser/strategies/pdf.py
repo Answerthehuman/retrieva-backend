@@ -65,7 +65,12 @@ class PdfParserStrategy(ParserStrategy):
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
         ])
         response = self.vision_llm.invoke([message])
-        return response.content
+        # .text, not .content — some providers return content as a list of
+        # blocks rather than a plain string. This return value flows straight
+        # into RecursiveCharacterTextSplitter.split_text(), which requires a
+        # str; a list here would raise deep inside the chunker on every
+        # scanned page, far from this line.
+        return response.text
 
     def parse_pages(self, file_path: Path) -> List[str]:
         """Return per-page text as a list.

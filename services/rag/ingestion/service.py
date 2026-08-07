@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
 
 from core.config.settings import get_settings
+from core.observability import build_callbacks, trace_metadata
 from core.providers import get_embeddings, get_llm
 from services.rag.ingestion.parser.parser import NativeParser
 from services.rag.ingestion.chunker.chunker import RecursiveChunker
@@ -152,6 +153,21 @@ class IngestionService:
                         },
                     )
                 )
+
+            # The chunker indexes chunks per call, so every page restarts at
+            # chunk_0 and the generated ids collide across pages
+            # ({doc_id}_chunk_0 exists once per page). MilvusWriter upserts by
+            # primary key, so without this re-indexing each page would silently
+            # overwrite the previous page's rows — a multi-page document would
+            # keep only its last page while still reporting the full chunk
+            # count as `inserted`. Re-key globally across the document.
+            total = len(chunks)
+            for global_index, chunk in enumerate(chunks):
+                chunk["id"] = f"{doc_id}_chunk_{global_index}"
+                chunk["chunk_index"] = global_index
+                # Was per-page before; make it document-wide so the metadata
+                # actually describes the document.
+                chunk["total_chunks"] = total
             return chunks
 
         # One thread hop for the whole loop rather than one per page.
@@ -169,9 +185,43 @@ class IngestionService:
             SystemMessage(content="You are an expert at concisely summarizing documents. Provide a short 2-3 sentence summary of the following document to help with retrieval and cataloging. Focus on the core topic and key findings."),
             HumanMessage(content=sample_text)
         ]
-        response = await self.llm.ainvoke(prompt)
-        doc_summary = str(response.content)
-        logger.info("Document summary: %.100s...", doc_summary)
+        # The summary is retrieval metadata, not the payload. An LLM failure here
+        # (no credits, rate limit, transient 5xx) previously propagated out of
+        # ingest_file and became a 500 — discarding a document that had already
+        # been parsed, chunked and was ready to embed. Degrade instead: store the
+        # chunks with an empty summary rather than losing the whole ingestion.
+        try:
+            response = await self.llm.ainvoke(
+                prompt,
+                # Traced so ingestion shows up in Langfuse alongside chat, rather
+                # than being an untraced blind spot in the pipeline.
+                config={
+                    "callbacks": build_callbacks(self.settings),
+                    "metadata": trace_metadata(
+                        name="ingest:summarise",
+                        tags=["retrieva", "ingestion"],
+                        collection=target_collection,
+                        source=source,
+                        chunks=len(all_chunks),
+                    ),
+                },
+            )
+            # .text (not .content): some providers — Gemini 3.x confirmed —
+            # return content as a list of content blocks rather than a plain
+            # string. .text is a langchain-core helper that normalizes either
+            # shape to plain text; str(response.content) on the list form
+            # would have stored the Python repr of the block list as the
+            # summary instead of the actual text.
+            doc_summary = response.text
+            logger.info("Document summary: %.100s...", doc_summary)
+        except Exception as e:
+            doc_summary = ""
+            logger.warning(
+                "Document summary failed (%s) — ingesting without it. "
+                "Chunks and embeddings are unaffected; retrieval loses only the "
+                "document-level summary field.",
+                e,
+            )
         
         # Generate BM25 sparse vectors if hybrid search is enabled.
         # Vocabulary building is CPU-bound and stats persistence touches disk and
@@ -197,6 +247,11 @@ class IngestionService:
                     if sparse_generator._total_doc_length == 0 and sparse_generator.doc_count > 0:
                         sparse_generator._total_doc_length = int(sparse_generator.avg_doc_length * sparse_generator.doc_count)
 
+                # A collection already had chunks in it before this ingestion —
+                # their stored sparse_vector values are about to go stale (see
+                # below) and need re-embedding after the vocab update.
+                had_prior_chunks = bool(existing_stats and existing_stats.get("doc_count", 0) > 0)
+
                 # Build vocabulary with new chunk content
                 chunk_texts = [chunk["content"] for chunk in all_chunks]
                 sparse_generator.build_vocabulary(chunk_texts, incremental=True)
@@ -204,6 +259,36 @@ class IngestionService:
                 # Generate sparse vector for each chunk
                 for chunk in all_chunks:
                     chunk["sparse_vector"] = sparse_generator.generate_sparse_vector(chunk["content"])
+
+                # SparseVectorGenerator.build_vocabulary() reassigns every
+                # token's id on every call — it re-sorts the FULL cumulative
+                # vocabulary alphabetically and renumbers from 0, rather than
+                # appending new terms at new ids. Inserting a single new term
+                # that sorts earlier than existing ones shifts every later
+                # term's id. Any chunk already stored in Milvus before this
+                # ingestion has a sparse_vector keyed against the OLD id
+                # mapping, so it silently no longer matches the vocabulary
+                # this collection now uses — corrupting BM25/hybrid retrieval
+                # for every previously-ingested chunk, with no error raised
+                # anywhere. Re-embed those chunks' sparse_vector now so the
+                # whole collection stays aligned with one vocabulary.
+                if had_prior_chunks:
+                    field_names = [f.name for f in collection.schema.fields]
+                    stale_rows = collection.query(
+                        expr=f'document_id != "{doc_id}"',
+                        output_fields=field_names,
+                        limit=16384,  # fine at current scale; paginate if a collection ever exceeds this
+                    )
+                    if stale_rows:
+                        for row in stale_rows:
+                            row["sparse_vector"] = sparse_generator.generate_sparse_vector(row.get("content", ""))
+                        collection.upsert(stale_rows)
+                        collection.flush()
+                        logger.info(
+                            "Resynced sparse_vector for %d pre-existing chunk(s) in '%s' "
+                            "after vocabulary update",
+                            len(stale_rows), target_collection,
+                        )
 
                 # Save stats back to disk/cache
                 redis_client = None
