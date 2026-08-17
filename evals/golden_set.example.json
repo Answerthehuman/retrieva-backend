@@ -1,0 +1,47 @@
+{
+  "_readme": [
+    "Golden set for retrieval evaluation.",
+    "",
+    "Copy to golden_set.json and replace these with questions over YOUR OWN",
+    "documents. Public benchmarks do not reflect your corpus, your chunking, or",
+    "your users' phrasing — a golden set built from real questions people ask is",
+    "the only measurement that predicts real quality.",
+    "",
+    "How to build one (aim for 30-50 entries):",
+    "  1. Ingest your documents.",
+    "  2. Write questions you genuinely want answered.",
+    "  3. Find which chunks should answer each one:",
+    "       make eval-inspect QUERY='your question'",
+    "     then copy the ids of the chunks that truly answer it.",
+    "",
+    "Fields:",
+    "  id                   stable identifier (keeps history comparable)",
+    "  question             what the user asks",
+    "  relevant_doc_ids     chunk ids that genuinely answer it",
+    "  expected_substrings  optional: strings a correct answer should contain",
+    "  tags                 optional: for slicing results by question type",
+    "",
+    "Include hard cases deliberately — multi-hop questions, questions whose",
+    "answer is NOT in the corpus (relevant_doc_ids: []), and questions using",
+    "different vocabulary from the source. An eval set of only easy questions",
+    "will report success while retrieval quietly fails on everything that matters."
+  ],
+  "queries": [
+    {
+      "id": "q001",
+      "question": "What does Es Magico do?",
+      "relevant_doc_ids": [
+        "06b51e2a-dc00-4786-b247-3eebb0c4b5ee_chunk_0"
+      ],
+      "expected_substrings": ["enterprise"],
+      "tags": ["overview", "single-hop"]
+    },
+    {
+      "id": "q002",
+      "question": "Which banking clients are mentioned in the case studies?",
+      "relevant_doc_ids": [],
+      "expected_substrings": [],
+      "tags": ["multi-hop", "needs-real-ids"]
+    }
+  ]
+}

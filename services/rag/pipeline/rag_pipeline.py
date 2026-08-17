@@ -1,5 +1,6 @@
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -13,7 +14,7 @@ from core.utils.sse import format_sse_event
 logger = logging.getLogger(__name__)
 
 
-def _strip_vectors(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _strip_vectors(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {k: v for k, v in doc.items() if k not in ("dense_vector", "sparse_vector", "embedding")}
         for doc in documents
@@ -32,12 +33,12 @@ class RAGPipeline:
     async def query(
         self,
         query_text: str,
-        collection_name: Optional[str] = None,
-        chat_history: Optional[List[Dict[str, str]]] = None,
-        filters: Optional[str] = None,
-        mode: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        collection_name: str | None = None,
+        chat_history: list[dict[str, str]] | None = None,
+        filters: str | None = None,
+        mode: str | None = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         Run the agent end-to-end, yielding SSE events.
@@ -82,7 +83,7 @@ class RAGPipeline:
         # mechanism: every node, tool call, retrieval, and LLM generation shows
         # up as a nested span under one trace. Empty list when tracing is off,
         # which LangGraph treats as a no-op.
-        config: Dict[str, Any] = {
+        config: dict[str, Any] = {
             "recursion_limit": self.settings.agent_max_tool_calls * 2 + 1,
             "callbacks": build_callbacks(self.settings),
             "metadata": trace_metadata(

@@ -1,7 +1,8 @@
 """Recursive character text splitter wrapper."""
+
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class RecursiveChunker:
         *,
         chunk_size: int = 600,
         chunk_overlap: int = 120,
-        separators: Optional[List[str]] = None,
+        separators: list[str] | None = None,
         min_chunk_length: int = 50,
     ):
         from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -39,7 +40,9 @@ class RecursiveChunker:
             is_separator_regex=False,
         )
 
-    def chunk(self, text: str, *, document_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def chunk(
+        self, text: str, *, document_metadata: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Split text and return a list of chunk dicts.
 
@@ -55,15 +58,17 @@ class RecursiveChunker:
             chunk_text = chunk_text.strip()
             if not chunk_text or len(chunk_text) < self._min_length:
                 continue
-            chunks.append({
-                **base_metadata,
-                "id": f"{doc_id}_chunk_{i}",
-                "content": chunk_text,
-                "chunk_index": i,
-                "total_chunks": len(raw_chunks),
-                "chunk_size": len(chunk_text),
-                "chunker_used": "recursive",
-            })
+            chunks.append(
+                {
+                    **base_metadata,
+                    "id": f"{doc_id}_chunk_{i}",
+                    "content": chunk_text,
+                    "chunk_index": i,
+                    "total_chunks": len(raw_chunks),
+                    "chunk_size": len(chunk_text),
+                    "chunker_used": "recursive",
+                }
+            )
 
         logger.info(f"Created {len(chunks)} chunks from document '{doc_id}'")
         return chunks

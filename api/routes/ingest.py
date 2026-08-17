@@ -1,7 +1,6 @@
 import os
 import shutil
 import tempfile
-from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
@@ -21,7 +20,7 @@ router = APIRouter(prefix="/ingest")
 _PLACEHOLDER_COLLECTION_NAMES = {"string"}
 
 
-def _sanitize_collection_name(raw: Optional[str]) -> Optional[str]:
+def _sanitize_collection_name(raw: str | None) -> str | None:
     if raw is None:
         return None
     cleaned = raw.strip()
@@ -33,7 +32,7 @@ def _sanitize_collection_name(raw: Optional[str]) -> Optional[str]:
 @router.post("/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(...),
-    collection_name: Optional[str] = Form(
+    collection_name: str | None = Form(
         None,
         description=(
             "Target Milvus collection. Leave empty to use the server default "
@@ -56,7 +55,7 @@ async def upload_document(
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not save file: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not save file: {e}") from e
     finally:
         file.file.close()
 
@@ -69,7 +68,7 @@ async def upload_document(
         )
         return IngestResponse(**stats)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=friendly_error(e))
+        raise HTTPException(status_code=500, detail=friendly_error(e)) from e
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)

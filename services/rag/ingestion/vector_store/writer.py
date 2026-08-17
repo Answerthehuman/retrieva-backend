@@ -4,15 +4,16 @@ Embedding calls and the synchronous pymilvus Collection API are blocking I/O.
 They are dispatched through asyncio.to_thread so ingestion cannot stall the
 FastAPI event loop (and with it every in-flight chat stream).
 """
+
 import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Chunk dict keys that map to non-obvious Milvus field names
-_FIELD_ALIASES: Dict[str, List[str]] = {
+_FIELD_ALIASES: dict[str, list[str]] = {
     "text": ["content", "text"],
     "embedding": ["dense_vector", "embedding"],
 }
@@ -21,7 +22,7 @@ _FIELD_ALIASES: Dict[str, List[str]] = {
 _INT_FIELDS = {"page", "chunk_index", "total_chunks", "section_level"}
 
 
-def _extract_field(chunk: Dict[str, Any], field_name: str) -> Any:
+def _extract_field(chunk: dict[str, Any], field_name: str) -> Any:
     """Pull a field value from a chunk dict, trying aliases and returning safe defaults."""
     keys = _FIELD_ALIASES.get(field_name, [field_name])
     for key in keys:
@@ -42,7 +43,9 @@ class MilvusWriter:
         batch_size: Number of chunks per Milvus insert call.
     """
 
-    def __init__(self, *, collection, embedding_model=None, batch_size: int = 100, embed_batch_size: int = 50):
+    def __init__(
+        self, *, collection, embedding_model=None, batch_size: int = 100, embed_batch_size: int = 50
+    ):
         self._collection = collection
         self._embedding_model = embedding_model
         self._batch_size = batch_size
@@ -61,10 +64,10 @@ class MilvusWriter:
 
     async def upsert(
         self,
-        chunks: List[Dict[str, Any]],
+        chunks: list[dict[str, Any]],
         *,
         document_summary: str = "",
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """
         Embed (if needed) and upsert chunks into the collection.
 
@@ -81,12 +84,14 @@ class MilvusWriter:
             return {"inserted": 0}
 
         chunks = await self._ensure_embeddings(chunks)
-        ingested_at = datetime.now(timezone.utc).isoformat()
+        ingested_at = datetime.now(UTC).isoformat()
 
         total_inserted = 0
         for i in range(0, len(chunks), self._batch_size):
-            batch = chunks[i:i + self._batch_size]
-            data = self._build_insert_data(batch, document_summary=document_summary, ingested_at=ingested_at)
+            batch = chunks[i : i + self._batch_size]
+            data = self._build_insert_data(
+                batch, document_summary=document_summary, ingested_at=ingested_at
+            )
             await asyncio.to_thread(self._collection.upsert, data)
             total_inserted += len(batch)
             logger.info(
@@ -98,7 +103,7 @@ class MilvusWriter:
         logger.info(f"Flush complete. Total upserted: {total_inserted}")
         return {"inserted": total_inserted}
 
-    async def _ensure_embeddings(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _ensure_embeddings(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Generate dense_vector for chunks that don't already have one."""
         needs_embedding = [c for c in chunks if not c.get("dense_vector")]
         if not needs_embedding:
@@ -111,11 +116,13 @@ class MilvusWriter:
             )
 
         texts = [c["content"] for c in needs_embedding]
-        logger.info(f"Generating embeddings for {len(texts)} chunks in batches of {self._embed_batch_size}")
+        logger.info(
+            f"Generating embeddings for {len(texts)} chunks in batches of {self._embed_batch_size}"
+        )
 
-        all_vectors: List = []
+        all_vectors: list = []
         for i in range(0, len(texts), self._embed_batch_size):
-            batch = texts[i:i + self._embed_batch_size]
+            batch = texts[i : i + self._embed_batch_size]
             vectors = await asyncio.to_thread(self._embedding_model.embed_documents, batch)
             if len(vectors) != len(batch):
                 raise RuntimeError(
@@ -124,7 +131,9 @@ class MilvusWriter:
                     "Check that the embedding model is accessible and the texts are valid."
                 )
             all_vectors.extend(vectors)
-            logger.info(f"  Embedded batch {i // self._embed_batch_size + 1}/{-(-len(texts) // self._embed_batch_size)}")
+            logger.info(
+                f"  Embedded batch {i // self._embed_batch_size + 1}/{-(-len(texts) // self._embed_batch_size)}"
+            )
 
         idx = 0
         result = []
@@ -138,15 +147,15 @@ class MilvusWriter:
 
     def _build_insert_data(
         self,
-        batch: List[Dict[str, Any]],
+        batch: list[dict[str, Any]],
         *,
         document_summary: str,
         ingested_at: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Map chunk dicts to the collection's field schema."""
         rows = []
         for chunk in batch:
-            row: Dict[str, Any] = {}
+            row: dict[str, Any] = {}
             for field_name in self._field_names:
                 if field_name == "document_summary":
                     row[field_name] = chunk.get("document_summary") or document_summary

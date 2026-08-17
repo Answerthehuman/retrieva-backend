@@ -1,15 +1,17 @@
 """Async Milvus retriever for parallel semantic and hybrid search."""
+
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 def _ms(t: float) -> str:
-    return f"{t*1000:.0f}ms" if t < 1 else f"{t:.2f}s"
+    return f"{t * 1000:.0f}ms" if t < 1 else f"{t:.2f}s"
 
 
 def _tlog(label: str, t0: datetime, t1: datetime) -> str:
@@ -45,6 +47,7 @@ class AsyncRetriever:
         db_name: str = "",
     ):
         from pymilvus import AsyncMilvusClient
+
         self.client = AsyncMilvusClient(uri=uri, db_name=db_name)
         self.embedding_function = embedding_function
         self.top_k = top_k
@@ -60,10 +63,10 @@ class AsyncRetriever:
         collection_name: str,
         query: str,
         *,
-        limit: Optional[int] = None,
-        output_fields: Optional[List[str]] = None,
-        filters: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        limit: int | None = None,
+        output_fields: list[str] | None = None,
+        filters: str | None = None,
+    ) -> list[dict[str, Any]]:
         if self.embedding_function is None:
             raise RuntimeError("embedding_function is required")
 
@@ -90,12 +93,12 @@ class AsyncRetriever:
     async def search_bm25(
         self,
         collection_name: str,
-        sparse_vector: Dict[int, float],
+        sparse_vector: dict[int, float],
         *,
-        limit: Optional[int] = None,
-        output_fields: Optional[List[str]] = None,
-        filters: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        limit: int | None = None,
+        output_fields: list[str] | None = None,
+        filters: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not sparse_vector:
             return []
 
@@ -103,7 +106,10 @@ class AsyncRetriever:
             collection_name=collection_name,
             data=[sparse_vector],
             anns_field="sparse_vector",
-            search_params={"metric_type": "IP", "params": {"drop_ratio_search": self.bm25_drop_ratio}},
+            search_params={
+                "metric_type": "IP",
+                "params": {"drop_ratio_search": self.bm25_drop_ratio},
+            },
             limit=limit or self.sparse_top_k,
             output_fields=output_fields or [],
             filter=filters or "",
@@ -114,19 +120,25 @@ class AsyncRetriever:
         self,
         collection_name: str,
         query: str,
-        sparse_vector: Dict[int, float],
+        sparse_vector: dict[int, float],
         *,
-        limit: Optional[int] = None,
-        output_fields: Optional[List[str]] = None,
-        alpha: Optional[float] = None,
-        filters: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        limit: int | None = None,
+        output_fields: list[str] | None = None,
+        alpha: float | None = None,
+        filters: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Parallel semantic + BM25 via asyncio.gather, fused by weighted score."""
         semantic, bm25 = await asyncio.gather(
-            self.search_semantic(collection_name, query, limit=limit,
-                                 output_fields=output_fields, filters=filters),
-            self.search_bm25(collection_name, sparse_vector, limit=limit,
-                             output_fields=output_fields, filters=filters),
+            self.search_semantic(
+                collection_name, query, limit=limit, output_fields=output_fields, filters=filters
+            ),
+            self.search_bm25(
+                collection_name,
+                sparse_vector,
+                limit=limit,
+                output_fields=output_fields,
+                filters=filters,
+            ),
         )
         fused = self.fuse_results(semantic, bm25, alpha=alpha)
         return fused[:limit] if limit else fused
@@ -136,12 +148,12 @@ class AsyncRetriever:
     async def search_semantic_bulk(
         self,
         collection_name: str,
-        queries: List[str],
+        queries: list[str],
         *,
-        limit: Optional[int] = None,
-        output_fields: Optional[List[str]] = None,
-        filters: Optional[str] = None,
-    ) -> List[List[Dict[str, Any]]]:
+        limit: int | None = None,
+        output_fields: list[str] | None = None,
+        filters: str | None = None,
+    ) -> list[list[dict[str, Any]]]:
         """
         Embed all queries and send in one batched Milvus call.
         Returns one result list per query.
@@ -161,8 +173,16 @@ class AsyncRetriever:
                 lambda: [self.embedding_function(q) for q in queries]
             )
         else:
-            raise TypeError("embedding_function must be a callable, or have embed_documents/embed_query methods")
-        logger.info(_tlog(f"[bulk] embed {len(queries)} quer{'y' if len(queries)==1 else 'ies'}", t0, datetime.now()))
+            raise TypeError(
+                "embedding_function must be a callable, or have embed_documents/embed_query methods"
+            )
+        logger.info(
+            _tlog(
+                f"[bulk] embed {len(queries)} quer{'y' if len(queries) == 1 else 'ies'}",
+                t0,
+                datetime.now(),
+            )
+        )
 
         t1 = datetime.now()
         results = await self.client.search(
@@ -181,7 +201,7 @@ class AsyncRetriever:
             docs = []
             for hit in hits:
                 doc = {"id": hit["id"], "score": hit["distance"]}
-                for f in (output_fields or []):
+                for f in output_fields or []:
                     doc[f] = hit.get("entity", {}).get(f, "")
                 docs.append(doc)
             all_docs.append(docs)
@@ -191,12 +211,12 @@ class AsyncRetriever:
 
     async def search_parallel(
         self,
-        steps: List[Dict[str, Any]],
+        steps: list[dict[str, Any]],
         *,
-        output_fields: Optional[List[str]] = None,
-        bm25_loader: Optional[Callable] = None,
-        filters: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        output_fields: list[str] | None = None,
+        bm25_loader: Callable | None = None,
+        filters: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Execute retrieval plan steps in parallel with smart batching.
 
@@ -216,7 +236,7 @@ class AsyncRetriever:
         if not steps:
             return []
 
-        by_collection: Dict[str, List[Dict]] = defaultdict(list)
+        by_collection: dict[str, list[dict]] = defaultdict(list)
         for step in steps:
             by_collection[step.get("collection", "")].append(step)
 
@@ -226,14 +246,23 @@ class AsyncRetriever:
         )
 
         tasks = [
-            self._search_collection(col, col_steps, output_fields=output_fields,
-                                    bm25_loader=bm25_loader, filters=filters)
+            self._search_collection(
+                col,
+                col_steps,
+                output_fields=output_fields,
+                bm25_loader=bm25_loader,
+                filters=filters,
+            )
             for col, col_steps in by_collection.items()
         ]
         results_per_collection = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_docs = []
-        for col, result in zip(by_collection.keys(), results_per_collection):
+        # strict=True: asyncio.gather returns exactly one result per task and the
+        # tasks were built from by_collection, so a length mismatch would mean a
+        # real bug upstream. Better to raise than silently drop a collection's
+        # results.
+        for col, result in zip(by_collection.keys(), results_per_collection, strict=True):
             if isinstance(result, Exception):
                 logger.error(f"Search failed for '{col}': {result}")
                 continue
@@ -247,15 +276,15 @@ class AsyncRetriever:
     async def _search_collection(
         self,
         collection_name: str,
-        steps: List[Dict[str, Any]],
+        steps: list[dict[str, Any]],
         *,
-        output_fields: Optional[List[str]] = None,
-        bm25_loader: Optional[Callable] = None,
-        filters: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        output_fields: list[str] | None = None,
+        bm25_loader: Callable | None = None,
+        filters: str | None = None,
+    ) -> list[dict[str, Any]]:
         queries = [s["query"] for s in steps]
         t_col = datetime.now()
-        logger.info(f"[{collection_name}] {len(queries)} quer{'y' if len(queries)==1 else 'ies'}")
+        logger.info(f"[{collection_name}] {len(queries)} quer{'y' if len(queries) == 1 else 'ies'}")
 
         bm25_gen = bm25_loader(collection_name) if bm25_loader else None
 
@@ -263,8 +292,11 @@ class AsyncRetriever:
             t0 = datetime.now()
             tasks = [
                 self.search_hybrid(
-                    collection_name, q, bm25_gen.generate_sparse_vector(q),
-                    output_fields=output_fields, filters=filters,
+                    collection_name,
+                    q,
+                    bm25_gen.generate_sparse_vector(q),
+                    output_fields=output_fields,
+                    filters=filters,
                 )
                 for q in queries
             ]
@@ -274,15 +306,19 @@ class AsyncRetriever:
             logger.info(_tlog(f"[hybrid] {len(tasks)} parallel", t1, datetime.now()))
             docs = [dict(doc, _collection=collection_name) for result in results for doc in result]
         elif len(queries) == 1:
-            docs = await self.search_semantic(collection_name, queries[0],
-                                              output_fields=output_fields, filters=filters)
+            docs = await self.search_semantic(
+                collection_name, queries[0], output_fields=output_fields, filters=filters
+            )
             docs = [dict(doc, _collection=collection_name) for doc in docs]
         else:
             results_per_query = await self.search_semantic_bulk(
                 collection_name, queries, output_fields=output_fields, filters=filters
             )
-            docs = [dict(doc, _collection=collection_name)
-                    for result in results_per_query for doc in result]
+            docs = [
+                dict(doc, _collection=collection_name)
+                for result in results_per_query
+                for doc in result
+            ]
 
         logger.info(_tlog(f"[{collection_name}] done ({len(docs)} docs)", t_col, datetime.now()))
         return docs
@@ -293,7 +329,7 @@ class AsyncRetriever:
     # ── Score utilities ───────────────────────────────────────────────────────
 
     @staticmethod
-    def normalize_scores(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def normalize_scores(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not documents:
             return documents
         scores = [d["score"] for d in documents]
@@ -304,21 +340,25 @@ class AsyncRetriever:
 
     def fuse_results(
         self,
-        semantic: List[Dict[str, Any]],
-        bm25: List[Dict[str, Any]],
+        semantic: list[dict[str, Any]],
+        bm25: list[dict[str, Any]],
         *,
-        alpha: Optional[float] = None,
-    ) -> List[Dict[str, Any]]:
+        alpha: float | None = None,
+    ) -> list[dict[str, Any]]:
         a = alpha if alpha is not None else self.hybrid_semantic_weight
         b = 1.0 - a
 
         semantic = self.normalize_scores(semantic)
         bm25 = self.normalize_scores(bm25)
 
-        fused: Dict[Any, Dict] = {}
+        fused: dict[Any, dict] = {}
         for doc in semantic:
-            fused[doc["id"]] = {**doc, "semantic_score": doc["normalized_score"],
-                                 "bm25_score": 0.0, "hybrid_score": a * doc["normalized_score"]}
+            fused[doc["id"]] = {
+                **doc,
+                "semantic_score": doc["normalized_score"],
+                "bm25_score": 0.0,
+                "hybrid_score": a * doc["normalized_score"],
+            }
         for doc in bm25:
             if doc["id"] in fused:
                 fused[doc["id"]]["bm25_score"] = doc["normalized_score"]
@@ -326,16 +366,19 @@ class AsyncRetriever:
                     a * fused[doc["id"]]["semantic_score"] + b * doc["normalized_score"]
                 )
             else:
-                fused[doc["id"]] = {**doc, "semantic_score": 0.0,
-                                     "bm25_score": doc["normalized_score"],
-                                     "hybrid_score": b * doc["normalized_score"]}
+                fused[doc["id"]] = {
+                    **doc,
+                    "semantic_score": 0.0,
+                    "bm25_score": doc["normalized_score"],
+                    "hybrid_score": b * doc["normalized_score"],
+                }
 
         return sorted(fused.values(), key=lambda x: x["hybrid_score"], reverse=True)
 
     @staticmethod
-    def _dedup(documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _dedup(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Keep highest-scoring document per ID."""
-        seen: Dict[Any, Dict] = {}
+        seen: dict[Any, dict] = {}
         for doc in documents:
             key = "hybrid_score" if "hybrid_score" in doc else "score"
             if doc["id"] not in seen or doc.get(key, 0) > seen[doc["id"]].get(key, 0):
@@ -343,7 +386,7 @@ class AsyncRetriever:
         return list(seen.values())
 
     @staticmethod
-    def _extract(results, output_fields: List[str]) -> List[Dict[str, Any]]:
+    def _extract(results, output_fields: list[str]) -> list[dict[str, Any]]:
         docs = []
         for hits in results:
             for hit in hits:

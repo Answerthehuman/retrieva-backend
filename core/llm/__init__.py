@@ -3,6 +3,7 @@
 Defaults: Claude for every generation call, Ollama for embeddings.
 Gemini and OpenAI remain available as opt-in fallbacks.
 """
+
 from .anthropic import get_anthropic
 from .gemini import get_gemini, get_gemini_embeddings
 from .ollama import get_ollama_embeddings

@@ -1,11 +1,12 @@
 """Build and validate Milvus filter expressions from structured filter dicts."""
+
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def build_milvus_expression(filters: List[Dict[str, Any]]) -> Optional[str]:
+def build_milvus_expression(filters: list[dict[str, Any]]) -> str | None:
     """
     Build a Milvus filter expression from a list of filter dicts.
 
@@ -20,7 +21,9 @@ def build_milvus_expression(filters: List[Dict[str, Any]]) -> Optional[str]:
          {"field": "document_type", "operator": "==", "value": "proposal"}]
         → 'project_name like "%Nashik%" and document_type == "proposal"'
     """
-    conditions = [c for f in filters if (c := _build_condition(f["field"], f["operator"], f["value"]))]
+    conditions = [
+        c for f in filters if (c := _build_condition(f["field"], f["operator"], f["value"]))
+    ]
     if not conditions:
         return None
     expression = " and ".join(conditions)
@@ -38,19 +41,19 @@ def validate_expression(expression: str) -> bool:
     return any(op in expression for op in valid_ops)
 
 
-def _build_condition(field: str, operator: str, value: Any) -> Optional[str]:
+def _build_condition(field: str, operator: str, value: Any) -> str | None:
     if operator == "like":
         return f'{field} like "%{_escape(str(value))}%"'
     if operator == "in":
         if isinstance(value, list):
-            return f'{field} in [{", ".join(_fmt(v) for v in value)}]'
-        return f'{field} == {_fmt(value)}'
+            return f"{field} in [{', '.join(_fmt(v) for v in value)}]"
+        return f"{field} == {_fmt(value)}"
     if operator == "not in":
         if isinstance(value, list):
-            return f'{field} not in [{", ".join(_fmt(v) for v in value)}]'
-        return f'{field} != {_fmt(value)}'
+            return f"{field} not in [{', '.join(_fmt(v) for v in value)}]"
+        return f"{field} != {_fmt(value)}"
     if operator in ("==", "!=", ">", ">=", "<", "<="):
-        return f'{field} {operator} {_fmt(value)}'
+        return f"{field} {operator} {_fmt(value)}"
     logger.warning(f"Unknown operator: {operator}")
     return None
 

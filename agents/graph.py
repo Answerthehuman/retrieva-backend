@@ -1,5 +1,6 @@
 """LangGraph agent graph — a dynamic tool-calling ReAct-style loop."""
-from typing import List, Literal
+
+from typing import Literal
 
 from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import ToolNode
@@ -7,7 +8,7 @@ from langgraph.prebuilt import ToolNode
 from agents.state import AgentState
 
 
-def build_agent_graph(*, tools: List, llm=None, llm_with_tools=None):
+def build_agent_graph(*, tools: list, llm=None, llm_with_tools=None):
     """Compile the agent graph: agent <-> tools, looping until the LLM answers without a tool call.
 
     Pass either `llm` (a chat model; tools are bound here) or `llm_with_tools`

@@ -1,11 +1,12 @@
 """Factory for a BM25 stats loader, keyed by collection name."""
-from typing import Callable, Optional
+
+from collections.abc import Callable
 
 from .bm25_cache import load_bm25_stats
 from .generator import SparseVectorGenerator
 
 
-def build_bm25_loader(settings) -> Callable[[str], Optional[SparseVectorGenerator]]:
+def build_bm25_loader(settings) -> Callable[[str], SparseVectorGenerator | None]:
     """
     Return a callable(collection_name) -> SparseVectorGenerator | None.
 
@@ -13,7 +14,7 @@ def build_bm25_loader(settings) -> Callable[[str], Optional[SparseVectorGenerato
     from them. Returns None if hybrid search is disabled or no stats are cached yet.
     """
 
-    def bm25_loader(col_name: str) -> Optional[SparseVectorGenerator]:
+    def bm25_loader(col_name: str) -> SparseVectorGenerator | None:
         if not settings.hybrid_search_enabled:
             return None
         stats = load_bm25_stats(col_name)

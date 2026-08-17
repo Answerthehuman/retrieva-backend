@@ -1,15 +1,15 @@
 """Base strategy and shared vision prompt loader."""
+
 from abc import ABC, abstractmethod
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import Optional
 
 from ..image_describer import ImageDescriber
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_prompt(name: str) -> str:
     return (_PROMPTS_DIR / name).read_text(encoding="utf-8")
 
@@ -32,7 +32,7 @@ class ParserStrategy(ABC):
         *,
         vision_llm,
         image_describer: ImageDescriber,
-        vision_prompt: Optional[str] = None,
+        vision_prompt: str | None = None,
     ):
         self.vision_llm = vision_llm
         self.image_describer = image_describer

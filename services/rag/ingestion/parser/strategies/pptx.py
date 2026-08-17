@@ -1,4 +1,5 @@
 """PPTX parsing strategy — LibreOffice → PDF → vision OCR per slide."""
+
 import base64
 import logging
 import os
@@ -7,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 
@@ -70,7 +71,7 @@ class PptxParserStrategy(ParserStrategy):
         super().__init__(**kwargs)
         self._soffice_hint = libreoffice_path
 
-    def parse(self, file_path: Path) -> List[Dict[str, Any]]:
+    def parse(self, file_path: Path) -> list[dict[str, Any]]:
         import fitz
 
         logger.info(f"Parsing PPTX (vision OCR): {file_path}")
@@ -84,9 +85,9 @@ class PptxParserStrategy(ParserStrategy):
 
                 logger.info("Converting PPTX → PDF via LibreOffice (%s)", soffice)
                 subprocess.run(
-                    [soffice, "--headless", "--convert-to", "pdf",
-                     "--outdir", tmp, str(file_path)],
-                    check=True, capture_output=True,
+                    [soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp, str(file_path)],
+                    check=True,
+                    capture_output=True,
                 )
                 if not os.path.exists(pdf_path):
                     raise RuntimeError(f"LibreOffice did not produce PDF at {pdf_path}")
@@ -96,10 +97,15 @@ class PptxParserStrategy(ParserStrategy):
                     logger.info(f"  Slide {i + 1}/{len(doc)}")
                     pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
                     image_b64 = base64.b64encode(pix.tobytes("png")).decode("utf-8")
-                    message = HumanMessage(content=[
-                        {"type": "text", "text": self.vision_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-                    ])
+                    message = HumanMessage(
+                        content=[
+                            {"type": "text", "text": self.vision_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{image_b64}"},
+                            },
+                        ]
+                    )
                     response = self.vision_llm.invoke([message])
                     # .text, not .content — some providers return content as
                     # a list of blocks; .text normalizes either shape.
@@ -110,4 +116,3 @@ class PptxParserStrategy(ParserStrategy):
         except Exception as e:
             logger.error(f"PPTX parsing failed: {e}")
             return []
-

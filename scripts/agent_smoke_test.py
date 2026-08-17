@@ -10,14 +10,14 @@ Exercises, with the LLM/retriever mocked (no live Milvus/Redis/API keys needed):
 
 Run: poetry run python scripts/agent_smoke_test.py
 """
+
 import asyncio
 import json
+import re
 import sys
 
-import re
-
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 
 from agents.graph import build_agent_graph
@@ -41,9 +41,17 @@ class ScriptedChatModel(FakeMessagesListChatModel):
 
         if response.tool_calls:
             for idx, tc in enumerate(response.tool_calls):
-                chunk = AIMessageChunk(content="", tool_call_chunks=[{
-                    "name": tc["name"], "args": json.dumps(tc["args"]), "id": tc["id"], "index": idx,
-                }])
+                chunk = AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "name": tc["name"],
+                            "args": json.dumps(tc["args"]),
+                            "id": tc["id"],
+                            "index": idx,
+                        }
+                    ],
+                )
                 yield ChatGenerationChunk(message=chunk)
         else:
             for token in re.split(r"(\s)", response.content):
@@ -60,10 +68,20 @@ class StubSettings:
 class StubRetriever:
     async def search_parallel(self, steps, *, output_fields=None, bm25_loader=None, filters=None):
         return [
-            {"id": "doc-1", "score": 0.9, "content": "Retrieva is a hybrid RAG system.",
-             "source": "readme.md", "page": 1},
-            {"id": "doc-2", "score": 0.8, "content": "It uses Milvus for vector search.",
-             "source": "readme.md", "page": 2},
+            {
+                "id": "doc-1",
+                "score": 0.9,
+                "content": "Retrieva is a hybrid RAG system.",
+                "source": "readme.md",
+                "page": 1,
+            },
+            {
+                "id": "doc-2",
+                "score": 0.8,
+                "content": "It uses Milvus for vector search.",
+                "source": "readme.md",
+                "page": 2,
+            },
         ]
 
 
@@ -85,8 +103,13 @@ def _make_pipeline(fake_llm) -> RAGPipeline:
 
 
 async def _tally(pipeline: RAGPipeline, query_text: str) -> dict:
-    counts = {"retrieval_start": 0, "retrieval_complete": 0, "generation_start": 0,
-              "generation_complete": 0, "tokens": []}
+    counts = {
+        "retrieval_start": 0,
+        "retrieval_complete": 0,
+        "generation_start": 0,
+        "generation_complete": 0,
+        "tokens": [],
+    }
 
     async for sse_line in pipeline.query(query_text=query_text, collection_name="test_collection"):
         line = sse_line.strip()
@@ -116,12 +139,21 @@ async def case_chit_chat():
 
 
 async def case_tool_call_then_answer():
-    fake_llm = ScriptedChatModel(responses=[
-        AIMessage(content="", tool_calls=[
-            {"name": "search_knowledge_base", "args": {"query": "what is Retrieva"}, "id": "call_1"},
-        ]),
-        AIMessage(content="Retrieva is a hybrid RAG system (readme.md, p.1)."),
-    ])
+    fake_llm = ScriptedChatModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_knowledge_base",
+                        "args": {"query": "what is Retrieva"},
+                        "id": "call_1",
+                    },
+                ],
+            ),
+            AIMessage(content="Retrieva is a hybrid RAG system (readme.md, p.1)."),
+        ]
+    )
     pipeline = _make_pipeline(fake_llm)
     counts = await _tally(pipeline, "what is Retrieva?")
 

@@ -73,6 +73,12 @@ services:
       MINIO_REGION: us-east-1
     volumes:
       - milvus_data:/var/lib/milvus
+    # Capped per profile: Milvus will happily consume everything available,
+    # and an OOM here has previously taken the whole Docker VM down with it.
+    deploy:
+      resources:
+        limits:
+          memory: ${MILVUS_MEM_LIMIT:-1g}
     ports:
       - "19530:19530"
       - "9091:9091"
@@ -178,6 +184,10 @@ services:
       #   Container Ollama:  COMPOSE_OLLAMA_URL=http://ollama:11434 \
       #                      docker compose --profile ollama up -d
       - OLLAMA_BASE_URL=${COMPOSE_OLLAMA_URL:-http://host.docker.internal:11434}
+      # Resource/quality tier. Retrieval feature flags are derived from this
+      # unless set explicitly — see core/config/profiles.py.
+      - RETRIEVA_PROFILE=${RETRIEVA_PROFILE:-lite}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     # Docker Desktop resolves host.docker.internal automatically, but declaring
     # it keeps this working on plain Docker Engine / Linux hosts too.
     extra_hosts:

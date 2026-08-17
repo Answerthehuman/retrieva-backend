@@ -1,7 +1,5 @@
 """System prompts for the Retrieva agent, including per-mode behaviour."""
 
-from typing import Optional
-
 BASE_SYSTEM_PROMPT = """You are Retrieva, a helpful assistant that answers questions using the \
 user's connected knowledge base.
 
@@ -97,7 +95,7 @@ The user wants to understand something, not just receive a citation.
 AVAILABLE_MODES = tuple(MODE_PROMPTS.keys())
 
 
-def build_system_prompt(mode: Optional[str] = None) -> str:
+def build_system_prompt(mode: str | None = None) -> str:
     """Return the system prompt, optionally specialised for an action mode.
 
     An unknown or absent mode falls back to the base prompt rather than raising —

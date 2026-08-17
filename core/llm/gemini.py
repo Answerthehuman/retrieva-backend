@@ -1,16 +1,15 @@
 """Gemini LLM and Embeddings factory."""
-from typing import Optional
 
 
 def get_gemini(
     *,
     model: str = "gemini-3.5-flash-lite",
     temperature: float = 0.0,
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
     thinking: bool = False,
-    thinking_budget: Optional[int] = None,
-    google_api_key: Optional[str] = None,
-    additional_headers: Optional[dict] = None,
+    thinking_budget: int | None = None,
+    google_api_key: str | None = None,
+    additional_headers: dict | None = None,
 ):
     """Return a LangChain-compatible Gemini chat model.
 
@@ -22,7 +21,7 @@ def get_gemini(
     """
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    kwargs: dict = dict(model=model, temperature=temperature)
+    kwargs: dict = {"model": model, "temperature": temperature}
     if max_tokens is not None:
         kwargs["max_output_tokens"] = max_tokens
     if google_api_key is not None:
@@ -58,17 +57,17 @@ def get_gemini_embeddings(
     model: str = "models/gemini-embedding-2",
     task_type: str = "retrieval_document",
     output_dimensionality: int = 3072,
-    additional_headers: Optional[dict] = None,
+    additional_headers: dict | None = None,
 ):
     """Return a LangChain-compatible Gemini embeddings model."""
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-    kwargs: dict = dict(
-        model=model,
-        task_type=task_type,
-        output_dimensionality=output_dimensionality,
-    )
+    kwargs: dict = {
+        "model": model,
+        "task_type": task_type,
+        "output_dimensionality": output_dimensionality,
+    }
     if additional_headers is not None:
         kwargs["additional_headers"] = additional_headers
-        
+
     return GoogleGenerativeAIEmbeddings(**kwargs)

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# No secrets are needed or referenced. The suite mocks every provider and
+# conftest.py detaches Settings from .env, so CI cannot spend API credits even
+# if a key were configured on the runner.
+env:
+  USE_SQLITE: "true"
+  LANGFUSE_ENABLED: "false"
+  RETRIEVA_PROFILE: "lite"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pipx install poetry==2.3.1
+
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py311-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: |
+          poetry config virtualenvs.in-project true
+          # --only main,dev skips the `rerank` extra, keeping torch (and its
+          # ~3 GB of Linux CUDA packages) out of CI entirely.
+          poetry install --no-root --only main,dev
+
+      - name: Lint
+        run: |
+          poetry run ruff check .
+          poetry run ruff format --check .
+
+      - name: Test
+        run: poetry run pytest -q
+
+      - name: Verify no live API calls are possible
+        # Belt-and-braces: assert the credit-safety guard itself still holds,
+        # so a regression in conftest can't quietly re-enable real requests.
+        run: poetry run pytest tests/conftest.py::test_credit_safety_is_active -q

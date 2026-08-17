@@ -7,8 +7,9 @@ Tracing is **opt-in and fail-open**. With no keys configured it is silently
 inert, and any error inside the tracing layer is swallowed rather than allowed
 to break a chat turn — observability must never take down the thing it observes.
 """
+
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from core.config.settings import Settings, get_settings
 
@@ -55,7 +56,7 @@ def _build_handler(s: Settings):
         return None
 
 
-def get_langfuse_handler(settings: Optional[Settings] = None):
+def get_langfuse_handler(settings: Settings | None = None):
     """Return the shared callback handler, or None when tracing is off.
 
     Cached after the first call: building the handler opens an HTTP client and
@@ -70,7 +71,7 @@ def get_langfuse_handler(settings: Optional[Settings] = None):
     return _handler
 
 
-def build_callbacks(settings: Optional[Settings] = None) -> List[Any]:
+def build_callbacks(settings: Settings | None = None) -> list[Any]:
     """Callback list for LangChain/LangGraph ``config``. Empty when tracing is off."""
     handler = get_langfuse_handler(settings)
     return [handler] if handler else []
@@ -78,19 +79,19 @@ def build_callbacks(settings: Optional[Settings] = None) -> List[Any]:
 
 def trace_metadata(
     *,
-    session_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    name: Optional[str] = None,
-    tags: Optional[List[str]] = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    name: str | None = None,
+    tags: list[str] | None = None,
     **extra: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the LangChain ``config`` metadata Langfuse reads trace fields from.
 
     Langfuse picks up these reserved ``langfuse_*`` metadata keys and promotes
     them to first-class trace attributes, which is what makes traces filterable
     by session and user in the UI rather than being one anonymous blob per run.
     """
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
     if session_id:
         metadata["langfuse_session_id"] = session_id
     if user_id:

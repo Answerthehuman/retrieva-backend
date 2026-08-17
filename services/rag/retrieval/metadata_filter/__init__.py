@@ -1,10 +1,10 @@
 from .node import extract_filter
 from .tools import (
     FieldCache,
-    load_fields_from_collection,
-    get_default_fields,
-    extract_filters_from_query,
     build_milvus_expression,
+    extract_filters_from_query,
+    get_default_fields,
+    load_fields_from_collection,
     validate_expression,
 )
 from .version import __version__

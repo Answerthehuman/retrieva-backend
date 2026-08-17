@@ -1,18 +1,17 @@
 """OpenAI LLM and Embeddings factory."""
-from typing import Optional
 
 
 def get_openai(
     *,
     model: str = "gpt-4o-mini",
     temperature: float = 0.0,
-    max_tokens: Optional[int] = None,
-    api_key: Optional[str] = None,
+    max_tokens: int | None = None,
+    api_key: str | None = None,
 ):
     """Return a LangChain-compatible OpenAI chat model."""
     from langchain_openai import ChatOpenAI
 
-    kwargs: dict = dict(model=model, temperature=temperature)
+    kwargs: dict = {"model": model, "temperature": temperature}
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
     if api_key is not None:

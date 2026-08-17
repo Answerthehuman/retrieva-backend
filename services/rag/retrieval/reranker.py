@@ -1,7 +1,8 @@
 """Cross-encoder reranker for document relevance scoring."""
+
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -42,18 +43,19 @@ class Reranker:
 
     def _load_sync(self) -> None:
         from sentence_transformers import CrossEncoder
+
         logger.info(f"Loading reranker: {self.model_name}")
         self._model = CrossEncoder(self.model_name)
 
     async def rerank(
         self,
         query: str,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
         *,
-        top_k: Optional[int] = None,
-        batch_size: Optional[int] = None,
-        content_field: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        top_k: int | None = None,
+        batch_size: int | None = None,
+        content_field: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Rerank documents by relevance to query.
 
@@ -84,7 +86,7 @@ class Reranker:
         try:
             pairs = [[query, doc.get(field, "")] for doc in documents]
             scores = await asyncio.to_thread(self._model.predict, pairs, batch_size=bs)
-            for doc, score in zip(documents, scores):
+            for doc, score in zip(documents, scores, strict=True):
                 doc["rerank_score"] = float(score)
             reranked = sorted(documents, key=lambda d: d["rerank_score"], reverse=True)
             logger.info(f"Reranked {len(documents)} → top {k}")

@@ -1,6 +1,7 @@
 """Tools available to the Retrieva agent."""
+
 import logging
-from typing import Annotated, Any, Dict, List, Tuple
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -10,10 +11,14 @@ from agents.state import AgentState
 logger = logging.getLogger(__name__)
 
 
-def build_tools(*, retriever, reranker, llm, settings) -> List:
+def build_tools(*, retriever, reranker, llm, settings) -> list:
     """Build the tool list bound into the agent graph. Called once at graph-build time."""
     from core.utils.bm25 import build_bm25_loader
-    from services.rag.retrieval.metadata_filter import extract_filter, get_default_fields, validate_expression
+    from services.rag.retrieval.metadata_filter import (
+        extract_filter,
+        get_default_fields,
+        validate_expression,
+    )
     from services.rag.retrieval.orchestrator import retrieve
 
     bm25_loader = build_bm25_loader(settings)
@@ -22,7 +27,7 @@ def build_tools(*, retriever, reranker, llm, settings) -> List:
     async def search_knowledge_base(
         query: str,
         state: Annotated[AgentState, InjectedState],
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+    ) -> tuple[str, list[dict[str, Any]]]:
         """Search the knowledge base for facts, data, or document content relevant to `query`.
         Use this whenever answering requires information from ingested documents.
         Do NOT use for greetings, small talk, or questions about your own capabilities.

@@ -1,15 +1,24 @@
 import logging
-from typing import Dict, Any, List, Optional, Callable, Tuple
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_FIELDS = [
-    "id", "content", "document_id", "document_summary", "source",
-    "page", "chunk_index", "total_chunks", "chunk_size", "ingested_at",
+    "id",
+    "content",
+    "document_id",
+    "document_summary",
+    "source",
+    "page",
+    "chunk_index",
+    "total_chunks",
+    "chunk_size",
+    "ingested_at",
 ]
 
 
-def build_context(documents: List[Dict[str, Any]]) -> str:
+def build_context(documents: list[dict[str, Any]]) -> str:
     """Format retrieved documents into a context string for an LLM prompt."""
     if not documents:
         return "No context found."
@@ -18,26 +27,26 @@ def build_context(documents: List[Dict[str, Any]]) -> str:
         text = doc.get("content", "").strip()
         source = doc.get("file_name") or doc.get("source", "Unknown")
         page = doc.get("page", "")
-        
+
         page_str = f" (Page {page})" if page else ""
         parts.append(f"--- Document {i} [{source}{page_str}] ---\n{text}\n")
     return "\n".join(parts)
 
 
 async def retrieve(
-    retrieval_plan: List[Dict[str, Any]],
+    retrieval_plan: list[dict[str, Any]],
     standalone_query: str,
     *,
     retriever,
-    filters: Optional[str] = None,
-    collection_name: Optional[str] = None,
-    bm25_loader: Optional[Callable] = None,
+    filters: str | None = None,
+    collection_name: str | None = None,
+    bm25_loader: Callable | None = None,
     reranker=None,
     rerank_top_k: int = 10,
     rerank_batch_size: int = 20,
-    output_fields: Optional[List[str]] = None,
+    output_fields: list[str] | None = None,
     build_context_str: bool = True,
-) -> Tuple[List[Dict[str, Any]], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """
     Standalone retrieval workflow.
 
@@ -81,7 +90,9 @@ async def retrieve(
                 documents = await reranker.rerank(
                     standalone_query, documents, top_k=rerank_top_k, batch_size=rerank_batch_size
                 )
-            logger.info(f"Single-query retrieval: query='{standalone_query}', {len(documents)} documents")
+            logger.info(
+                f"Single-query retrieval: query='{standalone_query}', {len(documents)} documents"
+            )
         except Exception as e:
             logger.error(f"Retrieval failed: {e}", exc_info=True)
             return [], ""

@@ -1,14 +1,14 @@
 """NativeParser — orchestrates file-type strategies."""
+
 import logging
 from pathlib import Path
-from typing import List, Optional, Union
 
 from .image_describer import ImageDescriber
 from .strategies import (
-    PdfParserStrategy,
     DocxParserStrategy,
-    PptxParserStrategy,
     ExcelParserStrategy,
+    PdfParserStrategy,
+    PptxParserStrategy,
     TextParserStrategy,
 )
 
@@ -45,17 +45,19 @@ class NativeParser:
         *,
         vision_llm=None,
         libreoffice_path: str = "soffice",
-        vision_prompt: Optional[str] = None,
-        image_description_prompt: Optional[str] = None,
+        vision_prompt: str | None = None,
+        image_description_prompt: str | None = None,
     ):
         self._vision_llm = vision_llm
-        image_describer = ImageDescriber(llm=vision_llm, prompt=image_description_prompt) if vision_llm else None
-
-        strategy_kwargs = dict(
-            vision_llm=vision_llm,
-            image_describer=image_describer,
-            vision_prompt=vision_prompt,
+        image_describer = (
+            ImageDescriber(llm=vision_llm, prompt=image_description_prompt) if vision_llm else None
         )
+
+        strategy_kwargs = {
+            "vision_llm": vision_llm,
+            "image_describer": image_describer,
+            "vision_prompt": vision_prompt,
+        }
 
         self._strategies = {
             "pdf": PdfParserStrategy(**strategy_kwargs),
@@ -65,7 +67,7 @@ class NativeParser:
             "text": TextParserStrategy(**strategy_kwargs),
         }
 
-    def parse(self, file_path: Union[str, Path]) -> str:
+    def parse(self, file_path: str | Path) -> str:
         """
         Parse a file and return its full text content as a single string.
 
@@ -92,7 +94,7 @@ class NativeParser:
             return "\n\n".join(item.get("text", "") for item in result if isinstance(item, dict))
         return result or ""
 
-    def parse_pages(self, file_path: Union[str, Path]) -> List[str]:
+    def parse_pages(self, file_path: str | Path) -> list[str]:
         """
         Parse a file and return per-page text as a list.
 

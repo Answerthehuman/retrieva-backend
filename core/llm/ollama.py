@@ -16,7 +16,6 @@ across models of different width.
 
 Pull the model before first use:  ``ollama pull nomic-embed-text``
 """
-from typing import Optional
 
 DEFAULT_MODEL = "nomic-embed-text"
 
@@ -28,7 +27,7 @@ MODEL_DIMENSIONS = {
 }
 
 
-def expected_dimension(model: str) -> Optional[int]:
+def expected_dimension(model: str) -> int | None:
     """Known vector width for a model, or None if unrecognized."""
     # Tolerate an explicit tag such as "bge-m3:latest".
     return MODEL_DIMENSIONS.get(model.split(":", 1)[0])
@@ -37,7 +36,7 @@ def expected_dimension(model: str) -> Optional[int]:
 def get_ollama_embeddings(
     *,
     model: str = DEFAULT_MODEL,
-    base_url: Optional[str] = None,
+    base_url: str | None = None,
 ):
     """Return a LangChain-compatible Ollama embeddings model.
 

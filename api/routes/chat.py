@@ -3,16 +3,15 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from core.db.database import SessionLocal, get_db
-from core.utils.errors import friendly_error
 from core.db.models.chat_message import ChatMessage
 from core.db.models.session import Session as SessionModel
+from core.utils.errors import friendly_error
 from services.rag.pipeline.rag_pipeline import RAGPipeline
 from shared.schemas.chat import (
     ChatMessageResponse,
@@ -64,7 +63,7 @@ def create_session(request: CreateSessionRequest, db: Session = Depends(get_db))
     )
 
 
-@router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
+@router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
 def list_messages(session_id: str, db: Session = Depends(get_db)):
     """Full transcript for a session, including the sources behind each answer."""
     session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
@@ -110,9 +109,7 @@ async def stream_message(session_id: str, request: SendMessageRequest):
                 .limit(HISTORY_LIMIT)
                 .all()
             )
-            history = [
-                {"role": m.message_type, "content": m.content} for m in reversed(recent)
-            ]
+            history = [{"role": m.message_type, "content": m.content} for m in reversed(recent)]
 
             db.add(
                 ChatMessage(
@@ -148,8 +145,8 @@ async def stream_message(session_id: str, request: SendMessageRequest):
             db.close()
 
     async def event_generator():
-        chunks: List[str] = []
-        sources: List[dict] = []
+        chunks: list[str] = []
+        sources: list[dict] = []
 
         try:
             # Constructed inside the try: building the pipeline resolves the LLM
@@ -189,7 +186,7 @@ async def stream_message(session_id: str, request: SendMessageRequest):
 
         except Exception as e:
             logger.error("Agent stream failed: %s", e, exc_info=True)
-            yield f'data: {json.dumps({"type": "event", "format": "error", "message": friendly_error(e)})}\n\n'
+            yield f"data: {json.dumps({'type': 'event', 'format': 'error', 'message': friendly_error(e)})}\n\n"
 
         if chunks:
             await asyncio.to_thread(_save_answer, "".join(chunks), sources)

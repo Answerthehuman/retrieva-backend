@@ -1,5 +1,9 @@
 """Graph state for the Retrieva agent."""
-from typing import Annotated, Any, Dict, List, Optional
+
+from typing import Annotated, Any
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langgraph.graph.message import add_messages
 
 # Must come from typing_extensions, not typing, on Python < 3.12. Pydantic (via
 # LangGraph's state schema validation) rejects typing.TypedDict there, because
@@ -7,9 +11,6 @@ from typing import Annotated, Any, Dict, List, Optional
 # the way Pydantic needs. On 3.11 this surfaced only at graph-invocation time as
 # "Please use `typing_extensions.TypedDict` instead of `typing.TypedDict`".
 from typing_extensions import TypedDict
-
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict):
@@ -22,14 +23,15 @@ class AgentState(TypedDict):
         filter picker), never chosen by the LLM. Merged with LLM-extracted filters
         inside the search tool.
     """
-    messages: Annotated[List[BaseMessage], add_messages]
+
+    messages: Annotated[list[BaseMessage], add_messages]
     collection_name: str
-    base_filters: Optional[str]
+    base_filters: str | None
 
 
-def history_to_messages(chat_history: Optional[List[Dict[str, Any]]]) -> List[BaseMessage]:
+def history_to_messages(chat_history: list[dict[str, Any]] | None) -> list[BaseMessage]:
     """Convert [{"role": "user"|"assistant", "content": str}, ...] to LangChain messages."""
-    messages: List[BaseMessage] = []
+    messages: list[BaseMessage] = []
     if not chat_history:
         return messages
     for msg in chat_history:

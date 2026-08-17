@@ -76,3 +76,47 @@ rerank = ["sentence-transformers"]
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-q --strict-markers"
+markers = [
+    "integration: needs live Milvus/Postgres (deselect with '-m \"not integration\"')",
+]
+# The suite must never spend API credits. conftest.py additionally clears
+# provider keys from the environment as a hard backstop.
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "__pycache__", "data", "evals/results"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort — import ordering
+    "B",    # bugbear — likely bugs
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+]
+ignore = [
+    "E501",  # line length is handled by the formatter
+    "B008",  # FastAPI's Depends()/File() in defaults is the documented idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately shadow names and use bare asserts.
+"tests/*" = ["B011"]
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.1.1,<10.0.0)",
+    "pytest-asyncio (>=1.4.0,<2.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "ruff (>=0.16.3,<0.17.0)"
+]

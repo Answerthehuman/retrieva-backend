@@ -1,8 +1,8 @@
 """PDF parsing strategy — native text extraction with Vision LLM OCR fallback."""
+
 import base64
 import logging
 from pathlib import Path
-from typing import List
 
 from langchain_core.messages import HumanMessage
 
@@ -11,8 +11,8 @@ from .base import ParserStrategy
 logger = logging.getLogger(__name__)
 
 # Heuristic thresholds
-_MIN_TEXT_LENGTH = 50       # Below this, the page is likely scanned
-_MAX_DRAWINGS_NATIVE = 30   # Above this many vector drawings, treat as complex layout
+_MIN_TEXT_LENGTH = 50  # Below this, the page is likely scanned
+_MAX_DRAWINGS_NATIVE = 30  # Above this many vector drawings, treat as complex layout
 
 
 def _page_needs_vision(page, extracted_text: str) -> bool:
@@ -60,10 +60,12 @@ class PdfParserStrategy(ParserStrategy):
 
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
         image_b64 = base64.b64encode(pix.tobytes("png")).decode("utf-8")
-        message = HumanMessage(content=[
-            {"type": "text", "text": self.vision_prompt},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-        ])
+        message = HumanMessage(
+            content=[
+                {"type": "text", "text": self.vision_prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+            ]
+        )
         response = self.vision_llm.invoke([message])
         # .text, not .content — some providers return content as a list of
         # blocks rather than a plain string. This return value flows straight
@@ -72,7 +74,7 @@ class PdfParserStrategy(ParserStrategy):
         # scanned page, far from this line.
         return response.text
 
-    def parse_pages(self, file_path: Path) -> List[str]:
+    def parse_pages(self, file_path: Path) -> list[str]:
         """Return per-page text as a list.
 
         For each page the strategy first tries native text extraction.
@@ -84,7 +86,7 @@ class PdfParserStrategy(ParserStrategy):
         logger.info(f"Parsing PDF: {file_path}")
         try:
             doc = fitz.open(str(file_path))
-            pages: List[str] = []
+            pages: list[str] = []
             vision_count = 0
 
             for i, page in enumerate(doc):

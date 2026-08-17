@@ -1,6 +1,7 @@
 """Natural-language to Milvus filter-expression extraction."""
+
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -9,8 +10,8 @@ async def extract_filter(
     query: str,
     *,
     llm=None,
-    fields: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[str]:
+    fields: list[dict[str, Any]] | None = None,
+) -> str | None:
     """
     Extract a Milvus filter expression from a natural language query.
 

@@ -5,6 +5,9 @@ __pycache__/
 *.pyd
 .venv/
 .env
+.env.full
+.env.lite
+.env.standard
 .venv
 .pytest_cache/
 

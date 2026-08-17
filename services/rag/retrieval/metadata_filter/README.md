@@ -27,8 +27,12 @@ expr = await extract_filter(
     llm=get_gemini(),
     fields=[
         {"name": "file_name", "dtype": "VARCHAR", "description": "Source file name"},
-        {"name": "section_type", "dtype": "VARCHAR", "description": "Type of section",
-         "examples": ["introduction", "table", "summary"]},
+        {
+            "name": "section_type",
+            "dtype": "VARCHAR",
+            "description": "Type of section",
+            "examples": ["introduction", "table", "summary"],
+        },
         {"name": "page", "dtype": "INT64", "description": "Page number"},
     ],
 )
@@ -77,10 +81,10 @@ if validate_expression(expr):
 Field dict shape:
 ```python
 {
-    "name":        str,           # Milvus field name
-    "dtype":       str,           # "VARCHAR", "INT64", etc.
-    "description": str,           # shown to LLM
-    "examples":    List[str],     # sample values shown to LLM (optional)
+    "name": str,  # Milvus field name
+    "dtype": str,  # "VARCHAR", "INT64", etc.
+    "description": str,  # shown to LLM
+    "examples": List[str],  # sample values shown to LLM (optional)
 }
 ```
 

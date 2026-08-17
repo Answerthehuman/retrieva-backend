@@ -1,7 +1,8 @@
 """Field value cache backed by an injected Redis client."""
+
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class FieldCache:
         self._r = redis_client
         self._key = key
 
-    def get(self) -> Optional[List[Dict[str, Any]]]:
+    def get(self) -> list[dict[str, Any]] | None:
         """Return the cached field list, or None on miss/error."""
         try:
             raw = self._r.get(self._key)
@@ -37,14 +38,14 @@ class FieldCache:
             logger.warning(f"FieldCache.get failed: {e}")
         return None
 
-    def set(self, fields: List[Dict[str, Any]]) -> None:
+    def set(self, fields: list[dict[str, Any]]) -> None:
         """Write the full field list to cache."""
         try:
             self._r.set(self._key, json.dumps(fields))
         except Exception as e:
             logger.warning(f"FieldCache.set failed: {e}")
 
-    def update(self, field_name: str, new_values: List[str]) -> None:
+    def update(self, field_name: str, new_values: list[str]) -> None:
         """
         Merge new example values into the cached entry for one field.
         Safe to call from ingestion pipelines after upserting documents.

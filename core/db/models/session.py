@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Text
+
+from sqlalchemy import Column, DateTime, String, Text
 from sqlalchemy.orm import relationship
 
 from ..database import Base
@@ -16,4 +17,6 @@ class Session(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    chat_messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+    chat_messages = relationship(
+        "ChatMessage", back_populates="session", cascade="all, delete-orphan"
+    )

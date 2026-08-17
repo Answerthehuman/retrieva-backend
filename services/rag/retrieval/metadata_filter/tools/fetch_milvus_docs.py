@@ -1,4 +1,5 @@
 """Fetch and cache Milvus filter syntax documentation for use in LLM prompts."""
+
 from pathlib import Path
 
 DOCS_URLS = [

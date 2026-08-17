@@ -13,7 +13,6 @@ Two model-specific rules are enforced here rather than left to callers:
   Adaptive thinking (``{"type": "adaptive"}``) is the supported replacement,
   with depth controlled by ``effort``.
 """
-from typing import Optional
 
 # Models that reject sampling parameters and fixed thinking budgets.
 # Everything in the Claude 5 / Opus 4.7+ generation behaves this way.
@@ -36,11 +35,11 @@ def _rejects_sampling_params(model: str) -> bool:
 def get_anthropic(
     *,
     model: str = DEFAULT_MODEL,
-    temperature: Optional[float] = None,
+    temperature: float | None = None,
     max_tokens: int = 16000,
     thinking: bool = False,
-    effort: Optional[str] = None,
-    api_key: Optional[str] = None,
+    effort: str | None = None,
+    api_key: str | None = None,
 ):
     """Return a LangChain-compatible Claude chat model.
 

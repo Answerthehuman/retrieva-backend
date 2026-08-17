@@ -1,6 +1,7 @@
 """Filterable field extraction from a Milvus collection."""
+
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +12,10 @@ _VECTOR_DTYPES = ("FLOAT_VECTOR", "BINARY_VECTOR", "SPARSE_FLOAT_VECTOR")
 def load_fields_from_collection(
     collection,
     *,
-    excluded_fields: Optional[List[str]] = None,
+    excluded_fields: list[str] | None = None,
     fetch_values: bool = False,
     value_limit: int = 100,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Extract filterable field definitions from an injected pymilvus Collection.
 
@@ -32,7 +33,7 @@ def load_fields_from_collection(
         List of field dicts: {name, dtype, description, [examples]}
     """
     excluded = set(excluded_fields or [])
-    fields: List[Dict[str, Any]] = []
+    fields: list[dict[str, Any]] = []
 
     try:
         for f in collection.schema.fields:
@@ -43,11 +44,13 @@ def load_fields_from_collection(
                 continue
             if f.name in excluded:
                 continue
-            fields.append({
-                "name": f.name,
-                "dtype": dtype_str,
-                "description": f.description or f"Field: {f.name}",
-            })
+            fields.append(
+                {
+                    "name": f.name,
+                    "dtype": dtype_str,
+                    "description": f.description or f"Field: {f.name}",
+                }
+            )
     except Exception as e:
         logger.error(f"Failed to read schema from collection '{collection.name}': {e}")
         return []
@@ -69,7 +72,7 @@ def load_fields_from_collection(
     return fields
 
 
-def get_default_fields() -> List[Dict[str, Any]]:
+def get_default_fields() -> list[dict[str, Any]]:
     """Built-in fallback fields used when no collection is available."""
     return [
         {

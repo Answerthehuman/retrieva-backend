@@ -5,8 +5,9 @@ Usage:
 
 All functions return the same instance on repeated calls (module-level cache).
 """
+
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from .config.settings import Settings, get_settings
 
@@ -24,7 +25,7 @@ _agent_graph = None
 _SUPPORTED_LLM_PROVIDERS = ("gemini", "anthropic", "openai")
 
 
-def _resolve_provider_order(s: Settings) -> List[str]:
+def _resolve_provider_order(s: Settings) -> list[str]:
     """Ordered, de-duplicated provider names from settings."""
     order = [p.strip().lower() for p in s.llm_fallback_order.split(",") if p.strip()]
 
@@ -36,7 +37,8 @@ def _resolve_provider_order(s: Settings) -> List[str]:
             order = [primary] + [p for p in order if p != primary]
             logger.info(
                 "LLM_PROVIDER=%s is deprecated; promoting it to the head of the "
-                "chain. Set LLM_FALLBACK_ORDER instead.", primary,
+                "chain. Set LLM_FALLBACK_ORDER instead.",
+                primary,
             )
 
     unknown = [p for p in order if p not in _SUPPORTED_LLM_PROVIDERS]
@@ -53,6 +55,7 @@ def _resolve_provider_order(s: Settings) -> List[str]:
 
 def _build_provider(name: str, s: Settings):
     """Construct one provider's chat model, or None if it has no API key."""
+
     # A legacy LLM_MODEL only makes sense for the provider it was written for.
     def _model_for(provider: str, default: str) -> str:
         if s.llm_model and s.llm_provider and s.llm_provider.strip().lower() == provider:
@@ -63,6 +66,7 @@ def _build_provider(name: str, s: Settings):
         if not s.google_api_key:
             return None
         from core.llm.gemini import get_gemini
+
         return get_gemini(
             model=_model_for("gemini", s.gemini_model),
             temperature=s.llm_temperature,
@@ -73,6 +77,7 @@ def _build_provider(name: str, s: Settings):
         if not s.anthropic_api_key:
             return None
         from core.llm.anthropic import get_anthropic
+
         # temperature is dropped inside the factory for models that reject it.
         return get_anthropic(
             model=_model_for("anthropic", s.anthropic_model),
@@ -87,6 +92,7 @@ def _build_provider(name: str, s: Settings):
         if not s.openai_api_key:
             return None
         from core.llm.openai import get_openai
+
         return get_openai(
             model=_model_for("openai", s.openai_model),
             temperature=s.llm_temperature,
@@ -96,7 +102,7 @@ def _build_provider(name: str, s: Settings):
     return None
 
 
-def get_llm_providers(settings: Optional[Settings] = None) -> List[Tuple[str, Any]]:
+def get_llm_providers(settings: Settings | None = None) -> list[tuple[str, Any]]:
     """Ordered (name, model) pairs for every *configured* provider.
 
     Providers without an API key are skipped rather than raising, so an
@@ -121,18 +127,20 @@ def get_llm_providers(settings: Optional[Settings] = None) -> List[Tuple[str, An
         logger.error(
             "No LLM provider is configured. Set at least one of GOOGLE_API_KEY, "
             "ANTHROPIC_API_KEY, or OPENAI_API_KEY for providers listed in "
-            "LLM_FALLBACK_ORDER=%s.", s.llm_fallback_order,
+            "LLM_FALLBACK_ORDER=%s.",
+            s.llm_fallback_order,
         )
     else:
         logger.info(
-            "LLM chain: %s", " → ".join(f"{n}" for n, _ in built),
+            "LLM chain: %s",
+            " → ".join(f"{n}" for n, _ in built),
         )
 
     _llm_providers = built
     return _llm_providers
 
 
-def _chain_with_fallbacks(runnables: List[Any]):
+def _chain_with_fallbacks(runnables: list[Any]):
     """First runnable, falling back through the rest on error."""
     if not runnables:
         raise RuntimeError(
@@ -144,7 +152,7 @@ def _chain_with_fallbacks(runnables: List[Any]):
     return runnables[0].with_fallbacks(runnables[1:])
 
 
-def get_llm(settings: Optional[Settings] = None):
+def get_llm(settings: Settings | None = None):
     """Chat LLM for plain (non-tool) calls, with automatic provider fallback.
 
     Used by document summarization, metadata-filter extraction, and vision OCR.
@@ -159,7 +167,7 @@ def get_llm(settings: Optional[Settings] = None):
     return _llm
 
 
-def get_llm_with_tools(tools: List, settings: Optional[Settings] = None):
+def get_llm_with_tools(tools: list, settings: Settings | None = None):
     """Tool-bound chat LLM with provider fallback.
 
     Tools are bound to each provider *before* chaining: RunnableWithFallbacks
@@ -169,7 +177,7 @@ def get_llm_with_tools(tools: List, settings: Optional[Settings] = None):
     return _chain_with_fallbacks([m.bind_tools(tools) for _, m in providers])
 
 
-def get_embeddings(settings: Optional[Settings] = None):
+def get_embeddings(settings: Settings | None = None):
     """Return a LangChain-compatible embedding model. Ollama by default."""
     global _embeddings
     if _embeddings is not None:
@@ -179,10 +187,12 @@ def get_embeddings(settings: Optional[Settings] = None):
 
     if s.embedding_provider == "openai":
         from core.llm.openai import get_openai_embeddings
+
         _embeddings = get_openai_embeddings(model=s.embedding_model)
         logger.info("Embedding provider: OpenAI (%s)", s.embedding_model)
     elif s.embedding_provider == "gemini":
         from core.llm.gemini import get_gemini_embeddings
+
         _embeddings = get_gemini_embeddings(model=s.embedding_model)
         logger.info("Embedding provider: Gemini (%s)", s.embedding_model)
     else:
@@ -196,21 +206,24 @@ def get_embeddings(settings: Optional[Settings] = None):
             logger.warning(
                 "EMBEDDING_DIM=%d does not match '%s' (expects %d). "
                 "Set EMBEDDING_DIM=%d and re-ingest into a fresh collection.",
-                s.embedding_dim, s.embedding_model, expected, expected,
+                s.embedding_dim,
+                s.embedding_model,
+                expected,
+                expected,
             )
 
-        _embeddings = get_ollama_embeddings(
-            model=s.embedding_model, base_url=s.ollama_base_url
-        )
+        _embeddings = get_ollama_embeddings(model=s.embedding_model, base_url=s.ollama_base_url)
         logger.info(
             "Embedding provider: Ollama (%s, dim=%d) at %s",
-            s.embedding_model, s.embedding_dim, s.ollama_base_url,
+            s.embedding_model,
+            s.embedding_dim,
+            s.ollama_base_url,
         )
 
     return _embeddings
 
 
-def get_retriever(settings: Optional[Settings] = None):
+def get_retriever(settings: Settings | None = None):
     """Return an AsyncRetriever connected to Milvus."""
     global _retriever
     if _retriever is not None:
@@ -228,7 +241,7 @@ def get_retriever(settings: Optional[Settings] = None):
     return _retriever
 
 
-def get_reranker(settings: Optional[Settings] = None):
+def get_reranker(settings: Settings | None = None):
     """Return a Reranker instance (lazy-loads the model on first rerank call)."""
     global _reranker
     if _reranker is not None:
@@ -260,7 +273,7 @@ def get_reranker(settings: Optional[Settings] = None):
     return _reranker
 
 
-def get_agent_graph(settings: Optional[Settings] = None):
+def get_agent_graph(settings: Settings | None = None):
     """Return the compiled Retrieva agent graph (built once, tools bound once)."""
     global _agent_graph
     if _agent_graph is not None:
@@ -270,7 +283,9 @@ def get_agent_graph(settings: Optional[Settings] = None):
     from agents.tools import build_tools
 
     s = settings or get_settings()
-    tools = build_tools(retriever=get_retriever(s), reranker=get_reranker(s), llm=get_llm(s), settings=s)
+    tools = build_tools(
+        retriever=get_retriever(s), reranker=get_reranker(s), llm=get_llm(s), settings=s
+    )
     _agent_graph = build_agent_graph(llm_with_tools=get_llm_with_tools(tools, s), tools=tools)
     logger.info("Agent graph compiled with %d tool(s)", len(tools))
     return _agent_graph

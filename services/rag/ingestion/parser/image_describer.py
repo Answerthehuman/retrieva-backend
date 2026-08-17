@@ -1,9 +1,9 @@
 """Vision-based image description helper."""
+
 import base64
 import logging
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import Optional
 
 from langchain_core.messages import HumanMessage
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_prompt(name: str) -> str:
     return (_PROMPTS_DIR / name).read_text(encoding="utf-8")
 
@@ -26,7 +26,7 @@ class ImageDescriber:
         prompt: Custom prompt template. Variable: {context}.
     """
 
-    def __init__(self, *, llm, prompt: Optional[str] = None):
+    def __init__(self, *, llm, prompt: str | None = None):
         self._llm = llm
         self._custom_prompt = prompt
 
@@ -36,10 +36,15 @@ class ImageDescriber:
             template = self._custom_prompt or _load_prompt("image_description.md")
             text = template.replace("{context}", context)
             image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-            message = HumanMessage(content=[
-                {"type": "text", "text": text},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
-            ])
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": text},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                    },
+                ]
+            )
             response = self._llm.invoke([message])
             # .text, not .content — some providers return a list of content
             # blocks rather than a plain string; .text normalizes either shape.

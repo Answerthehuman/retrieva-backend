@@ -1,9 +1,10 @@
 """Extract Milvus filter expressions from natural language using an LLM."""
+
 import json
 import logging
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from .fetch_milvus_docs import save_content
 
@@ -13,7 +14,7 @@ _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_prompt(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -26,10 +27,10 @@ def _load_milvus_docs() -> str:
 
 async def extract_filters_from_query(
     query: str,
-    available_fields: List[Dict[str, Any]],
+    available_fields: list[dict[str, Any]],
     *,
     llm=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Extract a Milvus filter expression from a natural language query.
 
@@ -61,10 +62,12 @@ async def extract_filters_from_query(
             query=query,
         )
 
-        response = await llm.ainvoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ])
+        response = await llm.ainvoke(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
         # .text, not .content — providers that return content as a list of
         # blocks (Gemini 3.x confirmed) would make .content.strip() raise
         # AttributeError outright, since list has no .strip(). .text
@@ -79,10 +82,15 @@ async def extract_filters_from_query(
 
     except Exception as e:
         logger.error(f"Filter extraction failed: {e}")
-        return {"milvus_expression": None, "cleaned_query": query, "confidence": 0.0, "error": str(e)}
+        return {
+            "milvus_expression": None,
+            "cleaned_query": query,
+            "confidence": 0.0,
+            "error": str(e),
+        }
 
 
-def _format_fields_for_prompt(fields: List[Dict[str, Any]]) -> str:
+def _format_fields_for_prompt(fields: list[dict[str, Any]]) -> str:
     lines = []
     for f in fields:
         examples = f.get("examples", [])
@@ -92,7 +100,7 @@ def _format_fields_for_prompt(fields: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _parse_llm_response(content: str) -> Dict[str, Any]:
+def _parse_llm_response(content: str) -> dict[str, Any]:
     if "```json" in content:
         content = content.split("```json")[1].split("```")[0]
     elif "```" in content:

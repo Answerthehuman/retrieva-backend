@@ -1,4 +1,5 @@
 """Plain text / Markdown parsing strategy."""
+
 import logging
 from pathlib import Path
 

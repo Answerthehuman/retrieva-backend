@@ -1,4 +1,5 @@
 """Excel / CSV parsing strategy — converts sheets to Markdown tables."""
+
 import logging
 from pathlib import Path
 

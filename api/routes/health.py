@@ -3,10 +3,11 @@
 Reports per-dependency status rather than a bare "ok" so the UI (and any
 orchestrator) can tell the difference between "up" and "up but unusable".
 """
+
 import asyncio
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from sqlalchemy import text
 
 from core.config.settings import get_settings
@@ -23,7 +24,11 @@ def _check_database() -> dict:
             conn.execute(text("SELECT 1"))
         return {"status": "ok", "engine": DATABASE_URL.split("://", 1)[0]}
     except Exception as e:
-        return {"status": "error", "engine": DATABASE_URL.split("://", 1)[0], "detail": str(e)[:200]}
+        return {
+            "status": "error",
+            "engine": DATABASE_URL.split("://", 1)[0],
+            "detail": str(e)[:200],
+        }
 
 
 _LLM_ENV_VAR = {
@@ -55,12 +60,14 @@ def _check_llm(settings) -> dict:
 
     chain = []
     for name in _resolve_provider_order(settings):
-        chain.append({
-            "provider": name,
-            "model": models.get(name),
-            "configured": bool(keys.get(name)),
-            "env_var": _LLM_ENV_VAR.get(name),
-        })
+        chain.append(
+            {
+                "provider": name,
+                "model": models.get(name),
+                "configured": bool(keys.get(name)),
+                "env_var": _LLM_ENV_VAR.get(name),
+            }
+        )
 
     active = [c for c in chain if c["configured"]]
     if not active:
@@ -167,7 +174,7 @@ async def _check_milvus(settings) -> dict:
 
 
 @router.get("/health")
-async def health_check():
+async def health_check(request: Request):
     settings = get_settings()
 
     database, milvus, embeddings = await asyncio.gather(
@@ -177,11 +184,26 @@ async def health_check():
     )
     llm = _check_llm(settings)
 
+    # Config problems detected at boot (e.g. embedding dim vs the live
+    # collection), surfaced so a misconfiguration shows as "degraded" rather
+    # than hiding in logs nobody is watching.
+    #
+    # Read from startup state rather than re-running the check: it opens a
+    # blocking pymilvus connection, which inside this async handler would stall
+    # the event loop on every /health poll.
+    problems = getattr(request.app.state, "startup_problems", []) or []
+    config_check = (
+        {"status": "error", "detail": problems[0]}
+        if problems
+        else {"status": "ok", "embedding_dim": settings.embedding_dim}
+    )
+
     checks = {
         "database": database,
         "milvus": milvus,
         "llm": llm,
         "embeddings": embeddings,
+        "config": config_check,
     }
     # "degraded" == the service is reachable but can't fully serve requests.
     overall = "ok" if all(c["status"] == "ok" for c in checks.values()) else "degraded"
@@ -190,6 +212,10 @@ async def health_check():
         "service": "Retrieva",
         "status": overall,
         "version": "0.1.0",
+        # Which resource tier is active and what it enables. The UI reads this
+        # to explain *why* reranking or multi-query is off, rather than leaving
+        # degraded quality looking like a fault.
+        "profile": settings.profile_summary(),
         "checks": checks,
         "config": {
             "embedding_model": settings.embedding_model,

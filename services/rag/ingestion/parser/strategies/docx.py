@@ -1,4 +1,5 @@
 """DOCX parsing strategy — text, tables, and embedded images."""
+
 import logging
 from pathlib import Path
 
@@ -34,7 +35,9 @@ class DocxParserStrategy(ParserStrategy):
                     rows.append(row_data)
                 if rows:
                     df = pd.DataFrame(rows)
-                    content.append(f"\n[Table {i + 1}]:\n{df.to_markdown(index=False, headers='keys')}\n")
+                    content.append(
+                        f"\n[Table {i + 1}]:\n{df.to_markdown(index=False, headers='keys')}\n"
+                    )
 
             processed = set()
             image_count = 0
@@ -49,7 +52,9 @@ class DocxParserStrategy(ParserStrategy):
                 processed.add(blob)
                 image_count += 1
                 try:
-                    desc = self.image_describer.describe(blob, context=f"Image {image_count} in document")
+                    desc = self.image_describer.describe(
+                        blob, context=f"Image {image_count} in document"
+                    )
                     content.append(desc)
                 except Exception as e:
                     logger.warning(f"Image {image_count} description failed: {e}")

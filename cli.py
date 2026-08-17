@@ -1,4 +1,5 @@
 """Retrieva CLI — ingest documents and query the RAG pipeline from the command line."""
+
 import argparse
 import asyncio
 import logging
@@ -18,10 +19,23 @@ logging.basicConfig(
 logger = logging.getLogger("retrieva.cli")
 
 # File extensions the ingestion pipeline can handle
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".csv", ".txt", ".md", ".markdown"}
+SUPPORTED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".pptx",
+    ".ppt",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".txt",
+    ".md",
+    ".markdown",
+}
 
 
 # ── Ingest ────────────────────────────────────────────────────────────────────
+
 
 async def _ingest(args: argparse.Namespace) -> None:
     from services.rag.ingestion.service import IngestionService
@@ -72,13 +86,17 @@ async def _ingest(args: argparse.Namespace) -> None:
         except Exception as e:
             logger.error("  ❌ Failed to ingest %s: %s", fpath.name, e, exc_info=True)
 
-    logger.info("═══ Ingestion complete: %d total chunks across %d file(s) ═══", total_inserted, len(files))
+    logger.info(
+        "═══ Ingestion complete: %d total chunks across %d file(s) ═══", total_inserted, len(files)
+    )
 
 
 # ── Query ─────────────────────────────────────────────────────────────────────
 
+
 async def _query(args: argparse.Namespace) -> None:
     import json
+
     from services.rag.pipeline.rag_pipeline import RAGPipeline
 
     pipeline = RAGPipeline()
@@ -132,6 +150,7 @@ async def _query(args: argparse.Namespace) -> None:
 
 # ── Arg parser ────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="retrieva",
@@ -142,26 +161,31 @@ def main() -> None:
     # ── ingest sub-command ────────────────────────────────────────────────────
     p_ingest = subparsers.add_parser("ingest", help="Ingest documents into a Milvus collection")
     p_ingest.add_argument(
-        "--path", required=True,
+        "--path",
+        required=True,
         help="Path to a file or directory containing documents to ingest.",
     )
     p_ingest.add_argument(
-        "--collection", default=None,
+        "--collection",
+        default=None,
         help="Target Milvus collection name (defaults to MILVUS_DEFAULT_COLLECTION from .env).",
     )
     p_ingest.add_argument(
-        "--source", default=None,
+        "--source",
+        default=None,
         help="Source identifier / metadata label for the ingested document(s).",
     )
 
     # ── query sub-command ─────────────────────────────────────────────────────
     p_query = subparsers.add_parser("query", help="Query the RAG pipeline and stream the response")
     p_query.add_argument(
-        "query", nargs="+",
+        "query",
+        nargs="+",
         help="The question to ask the RAG pipeline.",
     )
     p_query.add_argument(
-        "--collection", default=None,
+        "--collection",
+        default=None,
         help="Milvus collection to search (defaults to MILVUS_DEFAULT_COLLECTION from .env).",
     )
 

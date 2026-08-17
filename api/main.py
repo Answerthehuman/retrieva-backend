@@ -1,20 +1,30 @@
 """FastAPI application entry point for Retrieva."""
+
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes.health import router as health_router
-from .routes.chat import router as chat_router
-from .routes.ingest import router as ingest_router
 from core.config.settings import get_settings
 from core.db.database import Base, engine
-from core.observability import flush as flush_langfuse, get_langfuse_handler
-from core.providers import close_retriever, get_llm, get_embeddings, get_retriever
+from core.logging_config import configure_logging
+from core.observability import flush as flush_langfuse
+from core.observability import get_langfuse_handler
+from core.providers import close_retriever, get_embeddings, get_llm, get_retriever
+from core.startup_checks import run_startup_checks
+
+from .routes.chat import router as chat_router
+from .routes.health import router as health_router
+from .routes.ingest import router as ingest_router
+
+settings = get_settings()
+
+# Must run before any logger is used, or the module-level loggers created at
+# import time keep the default WARNING level and startup logs vanish.
+configure_logging(settings.log_level)
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 @asynccontextmanager
@@ -47,6 +57,13 @@ async def lifespan(app: FastAPI):
     # Resolve tracing once at startup so its status is visible in the boot log
     # rather than only surfacing on the first chat turn.
     get_langfuse_handler(settings)
+
+    # Consistency checks (e.g. embedding dim vs the live Milvus collection).
+    # Reported loudly but not fatal — a restart loop would make /health
+    # unreachable exactly when it is needed to diagnose the problem.
+    app.state.startup_problems = run_startup_checks(settings)
+
+    logger.info("Active profile: %s", settings.retrieva_profile)
 
     logger.info("✅ Startup complete")
 
